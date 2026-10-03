@@ -376,7 +376,9 @@ END_TEST
 START_TEST(getpercentiledata_handles_epoch_month_in_eastward_timezone)
 {
 	percentiledata pdata;
-	struct tm start;
+	dbdatalist *samples = NULL;
+	dbdatalistinfo sampleinfo;
+	struct tm start, sample;
 
 	ck_assert_int_eq(setenv("TZ", "Asia/Singapore", 1), 0);
 	tzset();
@@ -386,6 +388,12 @@ START_TEST(getpercentiledata_handles_epoch_month_in_eastward_timezone)
 	ck_assert_int_eq(db_addinterface("interface"), 1);
 	ck_assert_int_eq(db_addtraffic_dated("interface", 0, 0, 85000), 1);
 	ck_assert_int_eq(db_setupdated("interface", 85000), 1);
+	ck_assert_int_eq(db_getdata_range(&samples, &sampleinfo, "interface", "fiveminute", 0, "", ""), 1);
+	ck_assert_int_eq(sampleinfo.count, 1);
+	sample = *localtime(&sampleinfo.maxtime);
+	ck_assert_int_eq(sample.tm_year, 70);
+	ck_assert_int_eq(sample.tm_mon, 0);
+	dbdatalistfree(&samples);
 	ck_assert_msg(getpercentiledata(&pdata, "interface", 0) == 1, "%s", errorstring);
 	start = *localtime(&pdata.monthbegin);
 	ck_assert_int_eq(start.tm_year, 70);
@@ -394,10 +402,11 @@ START_TEST(getpercentiledata_handles_epoch_month_in_eastward_timezone)
 	ck_assert_int_eq(start.tm_hour, 0);
 	ck_assert_int_eq(start.tm_min, 0);
 	ck_assert_int_eq(pdata.count, 1);
-	/* Preserve the existing getter's pseudo-calendar sample timestamps. */
-	ck_assert_int_eq(pdata.databegin, cfg.useutc ? 56100 : 84900);
-	ck_assert_int_eq(pdata.dataend, pdata.databegin);
-	ck_assert_int_eq(pdata.countexpectation, cfg.useutc ? 278 : 374);
+	/* SQLite versions differ in historical TZ conversion; preserve the getter contract. */
+	ck_assert_int_eq(pdata.databegin, sampleinfo.mintime);
+	ck_assert_int_eq(pdata.dataend, sampleinfo.maxtime);
+	ck_assert_int_eq(pdata.countexpectation,
+		((sample.tm_mday - 1) * 1440 + sample.tm_hour * 60 + sample.tm_min) / 5 + 1);
 	ck_assert_int_eq(pdata.sumrx, 0);
 	ck_assert_int_eq(pdata.sumtx, 0);
 	ck_assert_int_eq(pdata.rxpercentile, 0);

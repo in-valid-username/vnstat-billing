@@ -97,6 +97,12 @@ the original CLI, unchanged schema, SQLite integrity, JSON/XML parsing and PNG
 output. It does not change the VM clock. Synthetic C tests exercise cutoff
 boundaries, leap years, local DST, UTC, import labels and partial periods.
 
+The historical Singapore regression compares sample dates with the existing
+database getter's contract rather than hardcoding Unix epochs. SQLite versions
+on Ubuntu 22.04, Ubuntu 24.04 and macOS differ in their handling of Singapore's
+1970 UTC+7:30 offset. The test still requires the correct January billing start,
+sample count, coverage and totals; modern cutoff tests retain exact expectations.
+
 Sanitizer checks cover address/undefined behavior. Leak detection is disabled
 because upstream test fixtures intentionally leave allocations or exit child
 processes. This does not certify the absence of memory leaks in every path.

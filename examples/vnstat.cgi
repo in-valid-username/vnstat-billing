@@ -159,10 +159,10 @@ sub ensure_cache_dir
 	if (!@st || -l _ || !-d _) {
 		show_error("ERROR: cache path is not a real directory");
 	}
-	if ($st[4] != $> || ($st[2] & 0022)) {
+	if ($st[4] != $> || ($st[2] & oct('0022'))) {
 		show_error("ERROR: unsafe cache directory ownership or permissions");
 	}
-	if (($st[2] & 07777) != 0700) {
+	if (($st[2] & oct('07777')) != oct('0700')) {
 		chmod 0700, $tmp_dir or show_error("ERROR: failed to set cache directory mode");
 	}
 }
