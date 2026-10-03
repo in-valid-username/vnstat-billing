@@ -799,6 +799,68 @@ START_TEST(importlegacydb_can_import_legacy_database)
 END_TEST
 
 
+START_TEST(showhours_supports_all_unit_modes)
+{
+	int output, count;
+	char buffer[4096], header[32], *position;
+	interfaceinfo info;
+	time_t entry = (time_t)get_timestamp(2001, 1, 1, 12, 0);
+
+	cfg.unitmode = _i;
+	ck_assert_int_eq(db_open_rw(1), 1);
+	ck_assert_int_eq(db_addinterface("interface"), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 1048576, 2097152, (uint64_t)entry), 1);
+	ck_assert_int_eq(db_setupdated("interface", entry), 1);
+	ck_assert_int_eq(db_getinterfaceinfo("interface", &info), 1);
+	info.active = 0;
+
+	output = pipe_output();
+	showhours(&info);
+	fflush(stdout);
+	count = (int)read(output, buffer, sizeof(buffer) - 1);
+	ck_assert_int_gt(count, 0);
+	buffer[count] = '\0';
+	ck_assert_ptr_ne(strstr(buffer, "interface [disabled]"), NULL);
+	snprintf(header, sizeof(header), "tx (%s)", getunitprefix(2));
+	position = buffer;
+	for (count = 0; count < 3; count++) {
+		position = strstr(position, header);
+		ck_assert_ptr_ne(position, NULL);
+		position += strlen(header);
+	}
+	ck_assert_int_eq(close(output), 0);
+	ck_assert_int_eq(db_close(), 1);
+}
+END_TEST
+
+START_TEST(showhours_truncates_disabled_merged_interface_title)
+{
+	const char *name = "abcdefghijklmnopqrstuvwxyz12345";
+	char merged[MAXIFPARAMLEN], buffer[4096];
+	int output, count;
+	interfaceinfo info;
+	time_t entry = (time_t)get_timestamp(2001, 1, 1, 12, 0);
+
+	ck_assert_int_eq(db_open_rw(1), 1);
+	ck_assert_int_eq(db_addinterface(name), 1);
+	ck_assert_int_eq(db_addtraffic_dated(name, 1024, 2048, (uint64_t)entry), 1);
+	ck_assert_int_eq(db_setupdated(name, entry), 1);
+	snprintf(merged, sizeof(merged), "%s+%s+%s", name, name, name);
+	ck_assert_int_eq(db_getinterfaceinfo(merged, &info), 1);
+	info.active = 0;
+	output = pipe_output();
+	showhours(&info);
+	fflush(stdout);
+	count = (int)read(output, buffer, sizeof(buffer) - 1);
+	ck_assert_int_gt(count, 0);
+	buffer[count] = '\0';
+	ck_assert_ptr_ne(strchr(buffer, '\n'), NULL);
+	ck_assert_int_eq(strchr(buffer, '\n') - buffer, 80);
+	ck_assert_int_eq(close(output), 0);
+	ck_assert_int_eq(db_close(), 1);
+}
+END_TEST
+
 START_TEST(showalert_shows_nothing_with_none_type)
 {
 	int ret;
@@ -1227,6 +1289,8 @@ void add_database_tests(Suite *s)
 	tcase_add_test(tc_db, importlegacydb_does_not_overwrite_existing_interface_data);
 	tcase_add_test(tc_db, importlegacydb_can_detect_when_database_read_fails);
 	tcase_add_test(tc_db, importlegacydb_can_import_legacy_database);
+	tcase_add_loop_test(tc_db, showhours_supports_all_unit_modes, 0, 3);
+	tcase_add_test(tc_db, showhours_truncates_disabled_merged_interface_title);
 	tcase_add_test(tc_db, showalert_shows_nothing_with_none_type);
 	tcase_add_test(tc_db, showalert_shows_nothing_in_json_with_none_type);
 	tcase_add_test(tc_db, showalert_can_alert_on_limit_and_show_things);

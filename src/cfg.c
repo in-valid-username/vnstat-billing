@@ -15,6 +15,8 @@ int loadcfg(const char *cfgfile, const ConfigType type)
 		 {"DatabaseDir", cfg.dbdir, 0, 512, 0},
 		 {"Locale", cfg.locale, 0, 32, 0},
 		 {"MonthRotate", 0, &cfg.monthrotate, 0, 0},
+		 {"MonthRotateHour", 0, &cfg.monthrotatehour, 0, 0},
+		 {"MonthRotateMinute", 0, &cfg.monthrotateminute, 0, 0},
 		 {"MonthRotateAffectsYears", 0, &cfg.monthrotateyears, 0, 0},
 		 {"DayFormat", cfg.dformat, 0, 64, 0},
 		 {"MonthFormat", cfg.mformat, 0, 64, 0},
@@ -199,6 +201,13 @@ void validatecfg(const ConfigType type)
 	validateint("Sampletime", &cfg.sampletime, DEFSAMPTIME, 2, 600);
 	validatebool("LiveSpinner", &cfg.livespinner, LIVESPINNER);
 	validateint("MonthRotate", &cfg.monthrotate, MONTHROTATE, 1, 28);
+	validateint("MonthRotateHour", &cfg.monthrotatehour, MONTHROTATEHOUR, 0, 23);
+	validateint("MonthRotateMinute", &cfg.monthrotateminute, MONTHROTATEMINUTE, 0, 55);
+	if (cfg.monthrotateminute % 5 != 0) {
+		snprintf(errorstring, 1024, "MonthRotateMinute must be a multiple of 5, using default %d.", MONTHROTATEMINUTE);
+		printe(PT_Config);
+		cfg.monthrotateminute = MONTHROTATEMINUTE;
+	}
 	validatebool("MonthRotateAffectsYears", &cfg.monthrotateyears, MONTHROTATEYEARS);
 	validateint("MaxBandwidth", &cfg.maxbw, DEFMAXBW, 0, BWMAX);
 	validatebool("CheckDiskSpace", &cfg.spacecheck, USESPACECHECK);
@@ -341,6 +350,8 @@ void defaultcfg(void)
 	cfg.sampletime = DEFSAMPTIME;
 	cfg.livespinner = LIVESPINNER;
 	cfg.monthrotate = MONTHROTATE;
+	cfg.monthrotatehour = MONTHROTATEHOUR;
+	cfg.monthrotateminute = MONTHROTATEMINUTE;
 	cfg.monthrotateyears = MONTHROTATEYEARS;
 	cfg.unitmode = UNITMODE;
 	cfg.rateunitmode = RATEUNITMODE;

@@ -666,26 +666,27 @@ int db_getcounters(const char *iface, uint64_t *rxcounter, uint64_t *txcounter)
 	return 1;
 }
 
-int db_getinterfaceinfo(const char *iface, interfaceinfo *info)
+static int db_readinterfaceinfo(const char *iface, interfaceinfo *info, const int calendar)
 {
 	int rc;
 	char sql[768], *ifaceidin = NULL;
 	sqlite3_int64 ifaceid;
 	sqlite3_stmt *sqlstmt;
+	const char *tz = (calendar || !cfg.useutc) ? ", 'utc'" : "";
 
 	if (strchr(iface, '+') == NULL) {
 		ifaceid = db_getinterfaceid(iface, 0);
 		if (ifaceid == 0) {
 			return 0;
 		}
-		sqlite3_snprintf(768, sql, "select name, alias, active, strftime('%%s', created, 'utc'), strftime('%%s', updated, 'utc'), rxcounter, txcounter, rxtotal, txtotal from interface where id=%" PRId64 "", (int64_t)ifaceid);
+		sqlite3_snprintf(sizeof(sql), sql, "select name, alias, active, strftime('%%s', created%s), strftime('%%s', updated%s), rxcounter, txcounter, rxtotal, txtotal from interface where id=%" PRId64 "", tz, tz, (int64_t)ifaceid);
 	} else {
 		ifaceidin = db_getinterfaceidin(iface);
 		if (ifaceidin == NULL || strlen(ifaceidin) < 1) {
 			free(ifaceidin);
 			return 0;
 		}
-		sqlite3_snprintf(768, sql, "select '%q', NULL, max(active), max(strftime('%%s', created, 'utc')), min(strftime('%%s', updated, 'utc')), 0, 0, sum(rxtotal), sum(txtotal) from interface where id in (%s)", iface, ifaceidin);
+		sqlite3_snprintf(sizeof(sql), sql, "select '%q', NULL, max(active), max(strftime('%%s', created%s)), min(strftime('%%s', updated%s)), 0, 0, sum(rxtotal), sum(txtotal) from interface where id in (%s)", iface, tz, tz, ifaceidin);
 		free(ifaceidin);
 	}
 
@@ -697,6 +698,7 @@ int db_getinterfaceinfo(const char *iface, interfaceinfo *info)
 		return 0;
 	}
 	if (sqlite3_column_count(sqlstmt) != 9) {
+		sqlite3_finalize(sqlstmt);
 		return 0;
 	}
 	if (sqlite3_step(sqlstmt) == SQLITE_ROW) {
@@ -723,6 +725,17 @@ int db_getinterfaceinfo(const char *iface, interfaceinfo *info)
 	return 1;
 }
 
+int db_getinterfaceinfo(const char *iface, interfaceinfo *info)
+{
+	return db_readinterfaceinfo(iface, info, 1);
+}
+
+/* Daemon intervals must use real epochs, not the CLI's calendar timestamps. */
+int db_getinterfaceinfo_epoch(const char *iface, interfaceinfo *info)
+{
+	return db_readinterfaceinfo(iface, info, 0);
+}
+
 int db_setalias(const char *iface, const char *alias)
 {
 	char sql[128];
@@ -740,16 +753,26 @@ int db_setalias(const char *iface, const char *alias)
 int db_setinfo(const char *name, const char *value, const int createifnotfound)
 {
 	int rc;
-	char sql[128];
+	char *sql;
 
-	sqlite3_snprintf(128, sql, "update info set value='%q' where name='%q'", value, name);
+	sql = sqlite3_mprintf("update info set value='%q' where name='%q'", value, name);
+	if (sql == NULL) {
+		db_errcode = SQLITE_NOMEM;
+		return 0;
+	}
 	rc = db_exec(sql);
+	sqlite3_free(sql);
 	if (!rc || (!sqlite3_changes(db) && !createifnotfound)) {
 		return 0;
 	}
 	if (!sqlite3_changes(db) && createifnotfound) {
-		sqlite3_snprintf(512, sql, "insert into info (name, value) values ('%q', '%q')", name, value);
+		sql = sqlite3_mprintf("insert into info (name, value) values ('%q', '%q')", name, value);
+		if (sql == NULL) {
+			db_errcode = SQLITE_NOMEM;
+			return 0;
+		}
 		rc = db_exec(sql);
+		sqlite3_free(sql);
 	}
 	return rc;
 }
@@ -826,6 +849,27 @@ int db_getiflist_sorted(iflist **ifl, const int orderbytraffic)
 	return rc;
 }
 
+time_t db_getmonthlabel(const int64_t rowid)
+{
+	sqlite3_stmt *statement;
+	struct tm calendar = {0};
+	time_t label = (time_t)-1;
+
+	/* SQLite's historic UTC offset can differ from libc's and shift a month label. */
+	if (sqlite3_prepare_v2(db, "select strftime('%Y', date), strftime('%m', date) from month where id=?1", -1, &statement, NULL) == SQLITE_OK) {
+		sqlite3_bind_int64(statement, 1, (sqlite3_int64)rowid);
+		if (sqlite3_step(statement) == SQLITE_ROW && sqlite3_column_type(statement, 0) != SQLITE_NULL && sqlite3_column_type(statement, 1) != SQLITE_NULL) {
+			calendar.tm_year = sqlite3_column_int(statement, 0) - 1900;
+			calendar.tm_mon = sqlite3_column_int(statement, 1) - 1;
+			calendar.tm_mday = 1;
+			calendar.tm_isdst = -1;
+			label = mktime(&calendar);
+		}
+		sqlite3_finalize(statement);
+	}
+	return label;
+}
+
 char *db_get_date_generator(const int range, const short direct, const char *nowdate)
 {
 	static char dgen[512];
@@ -843,6 +887,10 @@ char *db_get_date_generator(const int range, const short direct, const char *now
 			snprintf(dgen, 512, "date(%s%s)", nowdate, cfg.dbtzmodifier);
 			break;
 		case 3: /* month */
+			if (!direct && (cfg.monthrotatehour != 0 || cfg.monthrotateminute != 0)) {
+				snprintf(dgen, sizeof(dgen), "strftime('%%Y-%%m-01', datetime(%s%s, '-%d days', '-%d hours', '-%d minutes'))", nowdate, cfg.dbtzmodifier, cfg.monthrotate - 1, cfg.monthrotatehour, cfg.monthrotateminute);
+				break;
+			}
 			if (direct || cfg.monthrotate == 1) {
 				snprintf(dgen, 512, "strftime('%%Y-%%m-01', %s%s)", nowdate, cfg.dbtzmodifier);
 			} else {
@@ -850,6 +898,10 @@ char *db_get_date_generator(const int range, const short direct, const char *now
 			}
 			break;
 		case 4: /* year */
+			if (!direct && cfg.monthrotateyears && (cfg.monthrotatehour != 0 || cfg.monthrotateminute != 0)) {
+				snprintf(dgen, sizeof(dgen), "strftime('%%Y-01-01', datetime(%s%s, '-%d days', '-%d hours', '-%d minutes'))", nowdate, cfg.dbtzmodifier, cfg.monthrotate - 1, cfg.monthrotatehour, cfg.monthrotateminute);
+				break;
+			}
 			if (direct || cfg.monthrotate == 1 || cfg.monthrotateyears == 0) {
 				snprintf(dgen, 512, "strftime('%%Y-01-01', %s%s)", nowdate, cfg.dbtzmodifier);
 			} else {
@@ -1024,7 +1076,7 @@ int db_removeoldentries(void)
 			if (debug) {
 				printf("  top - %d entries to be left\n", cfg.topdayentries);
 			}
-			sqlite3_snprintf(512, sql, "delete from top where id in ( select id from top where interface=%" PRId64 " and date!=date('now'%s) order by rx+tx desc, date asc limit -1 offset %d )", dbifl_i->id, cfg.dbtzmodifier, cfg.topdayentries);
+			sqlite3_snprintf(sizeof(sql), sql, "delete from top where id in ( select id from top where interface=%" PRId64 " and date!=date('now'%s) order by rx+tx desc, date asc limit -1 offset %d )", dbifl_i->id, cfg.dbtzmodifier, cfg.topdayentries);
 			if (!db_exec(sql)) {
 				db_rollbacktransaction();
 				iflistfree(&dbifl);

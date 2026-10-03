@@ -3,6 +3,32 @@
 #include "percentile.h"
 #include "dbxml.h"
 
+static void xmlstring(const char *string)
+{
+	const unsigned char *p = (const unsigned char *)string;
+
+	for (; *p; p++) {
+		switch (*p) {
+			case '&': fputs("&amp;", stdout); break;
+			case '<': fputs("&lt;", stdout); break;
+			case '>': fputs("&gt;", stdout); break;
+			case '"': fputs("&quot;", stdout); break;
+			case '\'': fputs("&apos;", stdout); break;
+			case '\t': fputs("&#9;", stdout); break;
+			case '\n': fputs("&#10;", stdout); break;
+			case '\r': fputs("&#13;", stdout); break;
+			default:
+				/* XML 1.0 cannot represent the remaining ASCII control characters. */
+				if (*p < 0x20) {
+					fputs("&#xfffd;", stdout);
+				} else {
+					putchar(*p);
+				}
+				break;
+		}
+	}
+}
+
 void showxml(const char *interface, const char mode, const char *databegin, const char *dataend)
 {
 	interfaceinfo ifaceinfo;
@@ -17,10 +43,15 @@ void showxml(const char *interface, const char mode, const char *databegin, cons
 		exit(EXIT_FAILURE);
 	}
 
-	printf(" <interface name=\"%s\">\n", ifaceinfo.name);
+	printf(" <interface name=\"");
+	xmlstring(ifaceinfo.name);
+	printf("\">\n");
 
-	printf("  <name>%s</name>\n", ifaceinfo.name);
-	printf("  <alias>%s</alias>\n", ifaceinfo.alias);
+	printf("  <name>");
+	xmlstring(ifaceinfo.name);
+	printf("</name>\n  <alias>");
+	xmlstring(ifaceinfo.alias);
+	printf("</alias>\n");
 
 	printf("  <created>");
 	xmldate(&ifaceinfo.created, 1);
@@ -137,7 +168,7 @@ void xmlpercentile(const interfaceinfo *ifaceinfo)
 	printf("   <average>");
 	printf("<rx_bytes_per_second>%" PRIu64 "</rx_bytes_per_second>", (uint64_t)((double)pdata.sumrx / (double)(pdata.count * 300)));
 	printf("<tx_bytes_per_second>%" PRIu64 "</tx_bytes_per_second>", (uint64_t)((double)pdata.sumtx / (double)(pdata.count * 300)));
-	printf("<total_bytes_per_second>%" PRIu64 "</total_bytes_per_second>", (uint64_t)((double)pdata.sumrx + (double)pdata.sumtx / (double)(pdata.count * 300)));
+	printf("<total_bytes_per_second>%" PRIu64 "</total_bytes_per_second>", (uint64_t)(((double)pdata.sumrx + (double)pdata.sumtx) / (double)(pdata.count * 300)));
 	printf("</average>\n");
 
 	printf("   <maximum>");
@@ -146,11 +177,12 @@ void xmlpercentile(const interfaceinfo *ifaceinfo)
 	printf("<total_bytes_per_second>%" PRIu64 "</total_bytes_per_second>", (uint64_t)((double)pdata.max / (double)300));
 	printf("</maximum>\n");
 
-	printf("   <95th_percentile>");
+	/* The legacy <95th_percentile> name was not valid XML. */
+	printf("   <percentile_95>");
 	printf("<rx_bytes_per_second>%" PRIu64 "</rx_bytes_per_second>", (uint64_t)((double)pdata.rxpercentile / (double)300));
 	printf("<tx_bytes_per_second>%" PRIu64 "</tx_bytes_per_second>", (uint64_t)((double)pdata.txpercentile / (double)300));
 	printf("<total_bytes_per_second>%" PRIu64 "</total_bytes_per_second>", (uint64_t)((double)pdata.sumpercentile / (double)300));
-	printf("</95th_percentile>\n");
+	printf("</percentile_95>\n");
 
 	printf("  </bandwidth>\n");
 }
@@ -186,7 +218,11 @@ void xmldate(const time_t *date, const int type)
 
 void xmlheader(void)
 {
-	printf("<vnstat version=\"%s\" xmlversion=\"%d\">\n", getversion(), XMLVERSION);
+	printf("<vnstat version=\"");
+	xmlstring(getversion());
+	printf("\" xmlversion=\"%d\">\n", XMLVERSION);
+	printf(" <billing><monthrotate>%d</monthrotate><monthrotatehour>%d</monthrotatehour><monthrotateminute>%d</monthrotateminute><monthrotateaffectsyears>%d</monthrotateaffectsyears><useutc>%d</useutc></billing>\n",
+	       cfg.monthrotate, cfg.monthrotatehour, cfg.monthrotateminute, cfg.monthrotateyears, cfg.useutc);
 }
 
 void xmlfooter(void)

@@ -202,6 +202,10 @@ void printcfgfile(void)
 	printf("# on which day should months change\n");
 	defaultcomment(cfg.monthrotate == MONTHROTATE);
 	printf("MonthRotate %d\n", cfg.monthrotate);
+	defaultcomment(cfg.monthrotatehour == MONTHROTATEHOUR);
+	printf("MonthRotateHour %d\n", cfg.monthrotatehour);
+	defaultcomment(cfg.monthrotateminute == MONTHROTATEMINUTE);
+	printf("MonthRotateMinute %d\n", cfg.monthrotateminute);
 	defaultcomment(cfg.monthrotateyears == MONTHROTATEYEARS);
 	printf("MonthRotateAffectsYears %d\n\n", cfg.monthrotateyears);
 

@@ -304,6 +304,109 @@ START_TEST(getpercentiledata_can_check_limit)
 }
 END_TEST
 
+START_TEST(getpercentiledata_respects_both_billing_cutoffs)
+{
+	const int days[] = {1, 1, 10, 28};
+	const int hours[] = {0, 12, 12, 23};
+	const int minutes[] = {0, 5, 5, 55};
+	time_t start, end;
+	percentiledata pdata;
+
+	cfg.monthrotate = days[_i];
+	cfg.monthrotatehour = hours[_i];
+	cfg.monthrotateminute = minutes[_i];
+	start = (time_t)get_timestamp(2020, 1, days[_i], hours[_i], minutes[_i]);
+	end = (time_t)get_timestamp(2020, 2, days[_i], hours[_i], minutes[_i]);
+	ck_assert_int_eq(db_open_rw(1), 1);
+	ck_assert_int_eq(db_addinterface("interface"), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 9000, 9000, (uint64_t)(start - 300)), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 1, 2, (uint64_t)start), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 2, 4, (uint64_t)(start + 300)), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 3, 6, (uint64_t)(end - 300)), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 9000, 9000, (uint64_t)end), 1);
+	/* A stale month label must not pull samples from the following billing period. */
+	ck_assert_int_eq(db_exec("DELETE FROM month WHERE date >= '2020-02-01'"), 1);
+	ck_assert_int_eq(db_setupdated("interface", end), 1);
+	ck_assert_int_eq(getpercentiledata(&pdata, "interface", 0), 1);
+	ck_assert_int_eq(pdata.monthbegin, start);
+	ck_assert_int_eq(pdata.databegin, start);
+	ck_assert_int_eq(pdata.dataend, end - 300);
+	ck_assert_int_eq(pdata.count, 3);
+	ck_assert_int_eq(pdata.countexpectation, (end - start) / 300);
+	ck_assert_int_eq(pdata.sumrx, 6);
+	ck_assert_int_eq(pdata.sumtx, 12);
+	ck_assert_int_eq(pdata.rxpercentile, 3);
+	ck_assert_int_eq(pdata.txpercentile, 6);
+	ck_assert_int_eq(db_close(), 1);
+}
+END_TEST
+
+START_TEST(getpercentiledata_keeps_calendar_timestamps_with_non_utc_timezone)
+{
+	percentiledata pdata;
+	struct tm start;
+	time_t entry;
+
+	ck_assert_int_eq(setenv("TZ", "Pacific/Honolulu", 1), 0);
+	tzset();
+	cfg.useutc = _i;
+	strcpy(cfg.dbtzmodifier, cfg.useutc ? "" : DATABASELOCALTIMEMODIFIER);
+	cfg.monthrotate = 10;
+	cfg.monthrotatehour = 12;
+	cfg.monthrotateminute = 5;
+	entry = (time_t)get_timestamp(2020, 1, 10, 12, 5);
+	ck_assert_int_eq(db_open_rw(1), 1);
+	ck_assert_int_eq(db_addinterface("interface"), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 9000, 9000, (uint64_t)(entry - 300)), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 1, 2, (uint64_t)entry), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 2, 4, (uint64_t)(entry + 300)), 1);
+	ck_assert_int_eq(getpercentiledata(&pdata, "interface", 0), 1);
+	start = *localtime(&pdata.monthbegin);
+	ck_assert_int_eq(start.tm_mday, 10);
+	ck_assert_int_eq(start.tm_hour, 12);
+	ck_assert_int_eq(start.tm_min, 5);
+	ck_assert_int_eq(pdata.count, 2);
+	ck_assert_int_eq(pdata.countexpectation, 2);
+	ck_assert_int_eq(pdata.sumrx, 3);
+	ck_assert_int_eq(pdata.sumtx, 6);
+	ck_assert_int_eq(db_close(), 1);
+}
+END_TEST
+
+START_TEST(getpercentiledata_handles_epoch_month_in_eastward_timezone)
+{
+	percentiledata pdata;
+	struct tm start;
+
+	ck_assert_int_eq(setenv("TZ", "Asia/Singapore", 1), 0);
+	tzset();
+	cfg.useutc = _i;
+	strcpy(cfg.dbtzmodifier, cfg.useutc ? "" : DATABASELOCALTIMEMODIFIER);
+	ck_assert_int_eq(db_open_rw(1), 1);
+	ck_assert_int_eq(db_addinterface("interface"), 1);
+	ck_assert_int_eq(db_addtraffic_dated("interface", 0, 0, 85000), 1);
+	ck_assert_int_eq(db_setupdated("interface", 85000), 1);
+	ck_assert_msg(getpercentiledata(&pdata, "interface", 0) == 1, "%s", errorstring);
+	start = *localtime(&pdata.monthbegin);
+	ck_assert_int_eq(start.tm_year, 70);
+	ck_assert_int_eq(start.tm_mon, 0);
+	ck_assert_int_eq(start.tm_mday, 1);
+	ck_assert_int_eq(start.tm_hour, 0);
+	ck_assert_int_eq(start.tm_min, 0);
+	ck_assert_int_eq(pdata.count, 1);
+	/* Preserve the existing getter's pseudo-calendar sample timestamps. */
+	ck_assert_int_eq(pdata.databegin, cfg.useutc ? 56100 : 84900);
+	ck_assert_int_eq(pdata.dataend, pdata.databegin);
+	ck_assert_int_eq(pdata.countexpectation, cfg.useutc ? 278 : 374);
+	ck_assert_int_eq(pdata.sumrx, 0);
+	ck_assert_int_eq(pdata.sumtx, 0);
+	ck_assert_int_eq(pdata.rxpercentile, 0);
+	ck_assert_int_eq(pdata.txpercentile, 0);
+	ck_assert_int_eq(pdata.sumpercentile, 0);
+	ck_assert_int_eq(db_close(), 1);
+}
+END_TEST
+
 void add_percentile_tests(Suite *s)
 {
 	TCase *tc_percentile = tcase_create("Percentile");
@@ -317,5 +420,8 @@ void add_percentile_tests(Suite *s)
 	tcase_add_test(tc_percentile, getpercentiledata_can_provide_data_with_many_entries);
 	tcase_add_test(tc_percentile, getpercentiledata_can_provide_data_with_many_entries_and_order_does_not_matter);
 	tcase_add_test(tc_percentile, getpercentiledata_can_check_limit);
+	tcase_add_loop_test(tc_percentile, getpercentiledata_respects_both_billing_cutoffs, 0, 4);
+	tcase_add_loop_test(tc_percentile, getpercentiledata_keeps_calendar_timestamps_with_non_utc_timezone, 0, 2);
+	tcase_add_loop_test(tc_percentile, getpercentiledata_handles_epoch_month_in_eastward_timezone, 0, 2);
 	suite_add_tcase(s, tc_percentile);
 }

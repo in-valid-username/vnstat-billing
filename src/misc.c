@@ -410,9 +410,15 @@ int validatedatetime(const char *str)
 int issametimeslot(const ListType listtype, const time_t entry, const time_t updated)
 {
 	struct tm e, u;
+	time_t start, end;
 
 	if (updated < entry) {
 		return 0;
+	}
+	if (listtype == LT_Month || listtype == LT_Year) {
+		start = billingperiodstart(entry, listtype == LT_Year, 0);
+		end = billingperiodstart(entry, listtype == LT_Year, 1);
+		return start != (time_t)-1 && end != (time_t)-1 && billingcalendartime(updated) >= start && billingcalendartime(updated) < end;
 	}
 
 	if (entry == updated) {
@@ -462,6 +468,27 @@ uint64_t getperiodseconds(const ListType listtype, const time_t entry, const tim
 {
 	struct tm e, u;
 	uint64_t seconds = 0;
+	time_t start, end;
+
+	if (listtype == LT_Month || (listtype == LT_Year && cfg.monthrotateyears)) {
+		start = billingperiodstart(entry, listtype == LT_Year, 0);
+		end = billingperiodstart(entry, listtype == LT_Year, 1);
+		if (start == (time_t)-1 || end == (time_t)-1 || end <= start) {
+			return 0;
+		}
+		if (isongoing) {
+			if (listtype == LT_Month && updated <= entry) {
+				return 1;
+			}
+			if (billingcalendartime(created) > start && created < updated) {
+				start = billingcalendartime(created);
+			}
+			if (billingcalendartime(updated) < end) {
+				end = billingcalendartime(updated);
+			}
+		}
+		return end > start ? (uint64_t)(end - start) : (listtype == LT_Month ? 1 : 0);
+	}
 
 	if (localtime_r(&entry, &e) == NULL || localtime_r(&updated, &u) == NULL) {
 		return 0;
@@ -506,6 +533,7 @@ void getestimates(uint64_t *rx, uint64_t *tx, const ListType listtype, const tim
 {
 	struct tm u;
 	uint64_t div = 0, mult = 0, offset = 0;
+	time_t start, end;
 	dbdatalist *datalist_i = *dbdata;
 
 	*rx = *tx = 0;
@@ -524,6 +552,24 @@ void getestimates(uint64_t *rx, uint64_t *tx, const ListType listtype, const tim
 	}
 
 	if (datalist_i->rx == 0 || datalist_i->tx == 0) {
+		return;
+	}
+
+	if (listtype == LT_Month || listtype == LT_Year) {
+		start = billingperiodstart(datalist_i->timestamp, listtype == LT_Year, 0);
+		end = billingperiodstart(datalist_i->timestamp, listtype == LT_Year, 1);
+		if (start == (time_t)-1 || end == (time_t)-1 || billingcalendartime(updated) < start || billingcalendartime(updated) >= end) {
+			return;
+		}
+		if (billingcalendartime(created) > start) {
+			start = billingcalendartime(created);
+		}
+		if (billingcalendartime(updated) > start && end > start) {
+			div = (uint64_t)(billingcalendartime(updated) - start);
+			mult = (uint64_t)(end - start);
+			*rx = (uint64_t)((double)datalist_i->rx / (double)div) * mult;
+			*tx = (uint64_t)((double)datalist_i->tx / (double)div) * mult;
+		}
 		return;
 	}
 

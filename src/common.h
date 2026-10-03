@@ -76,6 +76,8 @@ and most can be changed later from the config file.
 
 /* on which day should months change */
 #define MONTHROTATE 1
+#define MONTHROTATEHOUR 0
+#define MONTHROTATEMINUTE 0
 #define MONTHROTATEYEARS 0
 
 /* date output formats for -d, -m, -t and image header*/
@@ -345,7 +347,7 @@ typedef struct {
 	char cbg[8], cedge[8], cheader[8], cheadertitle[8], cheaderdate[8], ctext[8];
 	char cline[8], clinel[8], cpercentileline[8], cvnstat[8], crx[8], crxd[8], ctx[8], ctxd[8], ctotal[8];
 	int32_t unitmode, rateunitmode, rateunit, bvar, qmode, ifacematchmethod, sampletime, hourlyrate, summaryrate;
-	int32_t monthrotate, monthrotateyears, maxbw, spacecheck, trafficlessentries, transbg, ostyle;
+	int32_t monthrotate, monthrotatehour, monthrotateminute, monthrotateyears, maxbw, spacecheck, trafficlessentries, transbg, ostyle;
 	int32_t defaultdecimals, hourlydecimals, hourlystyle, is64bit, waldb, dbsynchronous, useutc, imagescale;
 	int32_t largefonts, linespaceadjust, estimatebarvisible, estimatestyle, estimatevisible, barshowsrate, fivegresultcount;
 	int32_t fivegheight, summarygraph, hourlygmode, alwaysadd, livespinner;
@@ -396,6 +398,8 @@ int verifylogaccess(void);
 int dmonth(const int month);
 int isleapyear(const int year);
 time_t mosecs(time_t month, time_t updated);
+time_t billingperiodstart(time_t label, const int yearly, const int next);
+time_t billingcalendartime(time_t label);
 uint64_t countercalc(const uint64_t *a, const uint64_t *b, const short is64bit);
 char *strncpy_nt(char *dest, const char *src, size_t n);
 int isnumeric(const char *s);

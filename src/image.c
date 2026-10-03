@@ -992,6 +992,9 @@ int drawfiveminutes(IMAGECONTENT *ic, const int xpos, const int ypos, const int 
 	gdImageString(ic->im, font, x - 21 - (ic->large * 3), y - 4 - (ic->large * 3), (unsigned char *)"  0", ic->ctext);
 
 	/* scale values */
+	if (max == 0) {
+		max = 1;
+	}
 	scaleunit = getscale(max, israte);
 
 	s = (int)lrint(((double)scaleunit / (double)max) * t);
@@ -1100,13 +1103,13 @@ int drawfiveminutes(IMAGECONTENT *ic, const int xpos, const int ypos, const int 
 			e = 1;
 		}
 
-		t = (int)lrint(((double)datalist_i->rx / e / (double)datainfo.maxrx) * rxh);
+		t = datainfo.maxrx == 0 ? 0 : (int)lrint(((double)datalist_i->rx / e / (double)datainfo.maxrx) * rxh);
 		if (t > rxh) {
 			t = rxh;
 		}
 		drawpole(ic, x + i, y - 1, t, 1, ic->crx);
 
-		t = (int)lrint(((double)datalist_i->tx / e / (double)datainfo.maxtx) * txh);
+		t = datainfo.maxtx == 0 ? 0 : (int)lrint(((double)datalist_i->tx / e / (double)datainfo.maxtx) * txh);
 		if (t > txh) {
 			t = txh;
 		}
@@ -1144,7 +1147,7 @@ void drawpercentile(IMAGECONTENT *ic, const int mode, const int xpos, const int 
 	double ratediv, percentileratediv;
 	const struct tm *d;
 	time_t current;
-	char datebuff[DATEBUFFLEN];
+	char datebuff[DATEBUFFLEN], dateend[DATEBUFFLEN];
 	dbdatalist *datalist = NULL, *datalist_i = NULL;
 	dbdatalistinfo datainfo;
 	percentiledata pdata;
@@ -1176,9 +1179,11 @@ void drawpercentile(IMAGECONTENT *ic, const int mode, const int xpos, const int 
 	}
 
 	d = localtime(&pdata.monthbegin);
-	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d", d);
+	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
+	d = localtime(&pdata.dataend);
+	strftime(dateend, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
 
-	if (!db_getdata_range(&datalist, &datainfo, ic->interface.name, "percentile", PERCENTILEENTRYCOUNT, datebuff, "") || datainfo.count == 0) {
+	if (!db_getdata_range(&datalist, &datainfo, ic->interface.name, "percentile", PERCENTILEENTRYCOUNT, datebuff, dateend) || datainfo.count == 0) {
 		gdImageString(ic->im, ic->font, x + 320 - (ic->large * 30), y - 120, (unsigned char *)"no percentile data available", ic->ctext);
 		return;
 	}
@@ -1204,6 +1209,9 @@ void drawpercentile(IMAGECONTENT *ic, const int mode, const int xpos, const int 
 
 	if ((uint64_t)((double)(percentile) / percentileratediv) > max) {
 		max = (uint64_t)((double)(percentile) / percentileratediv);
+	}
+	if (max == 0) {
+		max = 1;
 	}
 
 	/* scale values */

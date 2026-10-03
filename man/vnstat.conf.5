@@ -345,7 +345,24 @@ Day of month that months are expected to change. Usually set to
 monthly billed traffic where the billing period doesn't start on
 the first day. For example, if set to 7, days of February up to and
 including the 6th will count for January. Changing this option will
-not cause existing data to be recalculated. Value range: 1..28
+not cause existing data to be recalculated. Value range: 1..28.
+The boundary time is set by MonthRotateHour and MonthRotateMinute.
+All three settings use the database timezone (UTC when UseUTC is enabled,
+otherwise the daemon's local timezone). Use the same configuration and timezone
+for the daemon and query tools.
+
+.TP
+.B MonthRotateHour
+Hour of the monthly billing boundary. Value range: 0..23. Default: 0.
+
+.TP
+.B MonthRotateMinute
+Minute of the monthly billing boundary, in five-minute increments.
+Accepted values: 0, 5, 10, ..., 55. Default: 0. Invalid values produce a
+configuration warning and fall back to 0; values are not silently rounded.
+For example, MonthRotate 7, MonthRotateHour 18 and MonthRotateMinute 25
+start each billing month on day 7 at 18:25. The monthly database label
+remains the first day of that calendar month. Existing data is not rebilled.
 
 .TP
 .B MonthRotateAffectsYears
@@ -353,7 +370,7 @@ Enable or disable
 .B MonthRotate
 also affecting yearly data. Applicable only when
 .B MonthRotate
-has a value greater than one. 1 = enabled, 0 = disabled.
+or its hour or minute differs from the default. 1 = enabled, 0 = disabled.
 
 .TP
 .B OfflineSaveInterval

@@ -530,7 +530,7 @@ int initcachevalues(const DSTATE *s, datacache **dc)
 {
 	interfaceinfo ifaceinfo;
 
-	if (!db_getinterfaceinfo((*dc)->interface, &ifaceinfo)) {
+	if (!db_getinterfaceinfo_epoch((*dc)->interface, &ifaceinfo)) {
 		return 0;
 	}
 

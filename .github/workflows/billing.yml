@@ -1,0 +1,52 @@
+name: Billing Regression
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  billing:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake pkg-config libsqlite3-dev libgd-dev check clang python3 php-cli perl locales iproute2
+          sudo localedef -i de_DE -f UTF-8 de_DE.UTF-8
+      - name: GCC and Clang sanitizers
+        run: |
+          python3 tests/run_fork_checks.py /tmp/billing-gcc
+          python3 tests/run_fork_checks.py /tmp/billing-sanitized --compiler clang --sanitize --no-pie
+      - name: Output and example regressions
+        run: |
+          python3 tests/output_parse_tests.py /tmp/billing-gcc/vnstat --comma-locale de_DE.UTF-8
+          python3 tests/example_security.py
+      - name: UTC+8 and source package
+        run: |
+          cd /tmp/billing-gcc
+          TZ=Asia/Singapore make check
+          make distcheck
+      - name: Build the unmodified v2.13 baseline
+        run: |
+          mkdir /tmp/billing-upstream
+          git archive a77ace6e24028f22ec7213000daedfd5c7a9d70f | tar -x -C /tmp/billing-upstream
+          cd /tmp/billing-upstream
+          ./configure
+          make -j2
+      - name: Isolated real daemon and database compatibility
+        run: sudo unshare --net python3 tests/daemon_smoke.py /tmp/billing-gcc --upstream-build /tmp/billing-upstream --evidence /tmp/billing-smoke
+      - name: Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-evidence
+          path: |
+            /tmp/billing-gcc/verification.log
+            /tmp/billing-gcc/test.log
+            /tmp/billing-sanitized/verification.log
+            /tmp/billing-sanitized/test.log
+            /tmp/billing-smoke

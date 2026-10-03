@@ -7,7 +7,9 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 	uint32_t entry = 0, entrylimit;
 	uint64_t *rxdata, *txdata, *sumdata;
 	const struct tm *d;
-	char datebuff[DATEBUFFLEN];
+	struct tm calendar;
+	time_t monthlabel, monthbegin, monthend;
+	char datebuff[DATEBUFFLEN], dateend[DATEBUFFLEN];
 	dbdatalist *datalist = NULL, *datalist_i = NULL;
 	dbdatalistinfo datainfo;
 
@@ -28,14 +30,30 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 		return 0;
 	}
 
-	pdata->monthbegin = datainfo.mintime;
-	d = localtime(&pdata->monthbegin);
-	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d", d);
-
+	monthlabel = db_getmonthlabel(datalist->rowid);
+	monthbegin = monthlabel == (time_t)-1 ? (time_t)-1 : billingperiodstart(monthlabel, 0, 0);
+	monthend = monthlabel == (time_t)-1 ? (time_t)-1 : billingperiodstart(monthlabel, 0, 1);
 	dbdatalistfree(&datalist);
+	if (monthbegin == (time_t)-1 || monthend == (time_t)-1 || monthend <= monthbegin) {
+		snprintf(errorstring, 1024, "Failed to determine billing period for 95th percentile.");
+		printe(PT_Error);
+		return 0;
+	}
+	d = cfg.useutc ? gmtime(&monthbegin) : localtime(&monthbegin);
+	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
+	pdata->monthbegin = monthbegin;
+	if (cfg.useutc) {
+		/* Public dates retain the query-calendar contract. TZ=UTC avoids local DST gaps. */
+		calendar = *d;
+		calendar.tm_isdst = -1;
+		pdata->monthbegin = mktime(&calendar);
+	}
+	/* The range API has an inclusive end; exclude the next billing period's first slot. */
+	monthend -= 300;
+	d = cfg.useutc ? gmtime(&monthend) : localtime(&monthend);
+	strftime(dateend, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
 
-	/* limit query to a maximum of 8928 entries (31 days * 24 hours * 60 minutes / 5 minutes) */
-	if (!db_getdata_range(&datalist, &datainfo, iface, "fiveminute", 8928, datebuff, "")) {
+	if (!db_getdata_range(&datalist, &datainfo, iface, "fiveminute", 0, datebuff, dateend)) {
 		snprintf(errorstring, 1024, "Failed to fetch 5 minute data for 95th percentile.");
 		printe(PT_Error);
 		return 0;
@@ -50,7 +68,7 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 	pdata->databegin = datainfo.mintime;
 	pdata->dataend = datainfo.maxtime;
 	pdata->count = datainfo.count;
-	pdata->countexpectation = (uint32_t)((pdata->dataend - pdata->monthbegin) / 300 + 1);
+	pdata->countexpectation = (uint32_t)((billingcalendartime(pdata->dataend) - monthbegin) / 300 + 1);
 	pdata->minrx = datainfo.minrx;
 	pdata->mintx = datainfo.mintx;
 	pdata->min = datainfo.min;

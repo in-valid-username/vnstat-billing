@@ -7,6 +7,7 @@
 # copyright (c) 2000-2007 ETH Zurich
 # copyright (c) 2000-2007 David Schweikert <dws@ee.ethz.ch>
 # released under the GNU General Public License
+# Security backports (2026-10-04): command arguments, HTML output and cache checks.
 
 package vnStatCGI;
 use strict;
@@ -88,7 +89,16 @@ sub graph
 	}
 
 	if (defined $interface and defined $file and defined $param) {
-		$result = `"$vnstati_cmd" -i "$interface" -c $cachetime $param $fontparam --invert-colors $darkmode -o "$file"`;
+		my @args = ($vnstati_cmd, "-i", $interface, "-c", $cachetime,
+			split(/\s+/, $param), $fontparam, "--invert-colors", $darkmode, "-o", $file);
+		open(my $img, "-|", @args) or show_error("ERROR: failed to execute command");
+		binmode $img;
+		{
+			local $/;
+			$result = <$img>;
+		}
+		$result = '' unless defined $result;
+		close $img or show_error("ERROR: command failed");
 	} else {
 		show_error("ERROR: invalid input");
 	}
@@ -128,10 +138,44 @@ sub handle_image
 
 	if ($cachetime == '0') {
 		$file = '-';
+	} else {
+		my @st = lstat($file);
+		if (@st && (-l _ || !-f _ || $st[4] != $> || $st[3] != 1)) {
+			show_error("ERROR: unsafe cache file");
+		}
 	}
 
 	my $output = graph($interface, $file, $param);
 	send_image($file, $output);
+}
+
+sub ensure_cache_dir
+{
+	my @st = lstat($tmp_dir);
+	if (!@st) {
+		mkdir $tmp_dir, 0700 or show_error("ERROR: failed to create cache directory");
+		@st = lstat($tmp_dir);
+	}
+	if (!@st || -l _ || !-d _) {
+		show_error("ERROR: cache path is not a real directory");
+	}
+	if ($st[4] != $> || ($st[2] & 0022)) {
+		show_error("ERROR: unsafe cache directory ownership or permissions");
+	}
+	if (($st[2] & 07777) != 0700) {
+		chmod 0700, $tmp_dir or show_error("ERROR: failed to set cache directory mode");
+	}
+}
+
+sub html_escape
+{
+	my ($text) = @_;
+	return '' unless defined $text;
+	$text =~ s/&/&amp;/g;
+	$text =~ s/"/&quot;/g;
+	$text =~ s/</&lt;/g;
+	$text =~ s/>/&gt;/g;
+	return $text;
 }
 
 sub show_error
@@ -173,7 +217,8 @@ HEADER
 		if (length($indexhiddeninterfaces) > 0 && $interfaces[${i}] =~ /$indexhiddeninterfaces/) {
 			next;
 		}
-		print "<a href=\"${scriptname}?${i}-f\"><img src=\"${scriptname}?${i}-$indeximageoutput\" alt=\"$interfaces[${i}]\"></a>";
+		my $iface_name = html_escape($interfaces[$i]);
+		print "<a href=\"${scriptname}?${i}-f\"><img src=\"${scriptname}?${i}-$indeximageoutput\" alt=\"$iface_name\"></a>";
 		$interfacesshown++;
 		if ($indeximagesperrow > 0 && $interfacesshown % $indeximagesperrow == 0) {
 			print "<br>\n";
@@ -197,6 +242,7 @@ sub print_single_interface_html
 {
 	my ($interface) = @_;
 	my @interfaces = @vnStatCGI::interfaces;
+	my $iface_name = html_escape($interfaces[$interface]);
 
 	print "Content-Type: text/html\n\n";
 
@@ -206,7 +252,7 @@ sub print_single_interface_html
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">$metarefresh
 <meta name="generator" content="vnstat.cgi $VERSION">
-<title>Traffic Statistics for $servername - $interfaces[${interface}]</title>
+<title>Traffic Statistics for $servername - $iface_name</title>
 <style>
 <!--
 $csscommonstyle
@@ -218,14 +264,14 @@ $cssbody
 HEADER
 	print "<body>\n<br>\n";
 	print "<table>\n<tr><td>\n";
-	print "<img src=\"${scriptname}?${interface}-s\" alt=\"$interfaces[${interface}] summary\"><br>\n";
-	print "<a href=\"${scriptname}?s-${interface}-d-l\"><img src=\"${scriptname}?${interface}-d\" alt=\"$interfaces[${interface}] daily\"></a><br>\n";
-	print "<a href=\"${scriptname}?s-${interface}-t-l\"><img src=\"${scriptname}?${interface}-t\" alt=\"$interfaces[${interface}] top 10\"></a><br>\n";
+	print "<img src=\"${scriptname}?${interface}-s\" alt=\"$iface_name summary\"><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-d-l\"><img src=\"${scriptname}?${interface}-d\" alt=\"$iface_name daily\"></a><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-t-l\"><img src=\"${scriptname}?${interface}-t\" alt=\"$iface_name top 10\"></a><br>\n";
 	print "</td><td>\n";
-	print "<a href=\"${scriptname}?s-${interface}-h\"><img src=\"${scriptname}?${interface}-hg\" alt=\"$interfaces[${interface}] hourly\"></a><br>\n";
-	print "<a href=\"${scriptname}?s-${interface}-5\"><img src=\"${scriptname}?${interface}-5g\" alt=\"$interfaces[${interface}] 5 minute\"></a><br>\n";
-	print "<a href=\"${scriptname}?s-${interface}-m-l\"><img src=\"${scriptname}?${interface}-m\" alt=\"$interfaces[${interface}] monthly\"></a><br>\n";
-	print "<a href=\"${scriptname}?s-${interface}-y-l\"><img src=\"${scriptname}?${interface}-y\" alt=\"$interfaces[${interface}] yearly\"></a><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-h\"><img src=\"${scriptname}?${interface}-hg\" alt=\"$iface_name hourly\"></a><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-5\"><img src=\"${scriptname}?${interface}-5g\" alt=\"$iface_name 5 minute\"></a><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-m-l\"><img src=\"${scriptname}?${interface}-m\" alt=\"$iface_name monthly\"></a><br>\n";
+	print "<a href=\"${scriptname}?s-${interface}-y-l\"><img src=\"${scriptname}?${interface}-y\" alt=\"$iface_name yearly\"></a><br>\n";
 	print "</td></tr>\n</table>\n";
 
 	print <<FOOTER;
@@ -243,11 +289,15 @@ sub print_single_image_html
 	my $content = "";
 	my @interfaces = @vnStatCGI::interfaces;
 
-	if ($image =~ /^(\d+)-/) {
+	if ($image =~ /\A(\d+)-(?:5g|5|hsh|hs5|hs|hg|h|d-l|d|m-l|m|y-l|y|t-l|t)\z/) {
 		$interface = $1;
 	} else {
 		show_error("ERROR: invalid query");
 	}
+	if ($interface > $#interfaces) {
+		show_error("ERROR: no such interface");
+	}
+	my $iface_name = html_escape($interfaces[$interface]);
 
 	if ($image =~ /^\d+-5/) {
 		$content = "5 Minute";
@@ -273,7 +323,7 @@ sub print_single_image_html
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">$metarefresh
 <meta name="generator" content="vnstat.cgi $VERSION">
-<title>$content Traffic Statistics for $servername - $interfaces[${interface}]</title>
+<title>$content Traffic Statistics for $servername - $iface_name</title>
 <style>
 <!--
 $csscommonstyle
@@ -285,7 +335,7 @@ $cssbody
 HEADER
 	print "<body>\n<br>\n";
 	print "<table>\n<tr><td>\n";
-	print "<img src=\"${scriptname}?${image}\" alt=\"$interfaces[${interface}] ", lc($content), "\">\n";
+	print "<img src=\"${scriptname}?${image}\" alt=\"$iface_name ", lc($content), "\">\n";
 	print "</td></tr>\n</table>\n";
 
 	print <<FOOTER;
@@ -308,9 +358,13 @@ sub main
 			$scriptname = '';
 		}
 	}
+	$scriptname = html_escape($scriptname);
 
 	if (not defined $vnStatCGI::interfaces) {
-		our @interfaces = `$vnstati_cmd --dbiflist 1`;
+		open(my $iflist, "-|", $vnstati_cmd, "--dbiflist", "1")
+			or show_error("ERROR: failed to list interfaces");
+		our @interfaces = <$iflist>;
+		close $iflist or show_error("ERROR: failed to list interfaces");
 	}
 	chomp @vnStatCGI::interfaces;
 	my @interfaces = @vnStatCGI::interfaces;
@@ -319,6 +373,7 @@ sub main
 		$servername = `hostname`;
 		chomp $servername;
 	}
+	$servername = html_escape($servername);
 
 	if ($aligncenter != '0') {
 		$cssbody = "body { background-color: $bgcolor; text-align: center; display: block; }";
@@ -329,7 +384,7 @@ sub main
 	}
 
 	if ($cachetime != '0') {
-		mkdir $tmp_dir, 0755 unless -d $tmp_dir;
+		ensure_cache_dir();
 	}
 
 	my $query = $ENV{QUERY_STRING};
@@ -407,7 +462,7 @@ sub main
 		elsif ($query =~ /^(\d+)-f$/) {
 			print_single_interface_html($1);
 		}
-		elsif ($query =~ /^s-(.+)/) {
+		elsif ($query =~ /\As-(.+)\z/) {
 			print_single_image_html($1);
 		}
 		else {
