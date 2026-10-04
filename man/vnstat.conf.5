@@ -357,12 +357,18 @@ Hour of the monthly billing boundary. Value range: 0..23. Default: 0.
 
 .TP
 .B MonthRotateMinute
-Minute of the monthly billing boundary, in five-minute increments.
-Accepted values: 0, 5, 10, ..., 55. Default: 0. Invalid values produce a
+Minute of the monthly billing boundary, in one-minute increments.
+Accepted values: any integer from 0 through 59. Default: 0. Invalid values produce a
 configuration warning and fall back to 0; values are not silently rounded.
-For example, MonthRotate 7, MonthRotateHour 18 and MonthRotateMinute 25
-start each billing month on day 7 at 18:25. The monthly database label
+For example, MonthRotate 7, MonthRotateHour 18 and MonthRotateMinute 24
+start each billing month on day 7 at 18:24. The monthly database label
 remains the first day of that calendar month. Existing data is not rebilled.
+Off-grid billing minutes use one-minute in-memory traffic buckets. Persisted
+five-minute data retains its resolution. A collection interval crossing the
+boundary remains subject to counter sampling uncertainty; keep UpdateInterval
+short. SaveInterval controls persistence, not collection precision.
+The 95th percentile uses only five-minute samples fully inside the billing
+period, excluding partial samples at either end without prorating them.
 
 .TP
 .B MonthRotateAffectsYears

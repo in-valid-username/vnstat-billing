@@ -202,12 +202,7 @@ void validatecfg(const ConfigType type)
 	validatebool("LiveSpinner", &cfg.livespinner, LIVESPINNER);
 	validateint("MonthRotate", &cfg.monthrotate, MONTHROTATE, 1, 28);
 	validateint("MonthRotateHour", &cfg.monthrotatehour, MONTHROTATEHOUR, 0, 23);
-	validateint("MonthRotateMinute", &cfg.monthrotateminute, MONTHROTATEMINUTE, 0, 55);
-	if (cfg.monthrotateminute % 5 != 0) {
-		snprintf(errorstring, 1024, "MonthRotateMinute must be a multiple of 5, using default %d.", MONTHROTATEMINUTE);
-		printe(PT_Config);
-		cfg.monthrotateminute = MONTHROTATEMINUTE;
-	}
+	validateint("MonthRotateMinute", &cfg.monthrotateminute, MONTHROTATEMINUTE, 0, 59);
 	validatebool("MonthRotateAffectsYears", &cfg.monthrotateyears, MONTHROTATEYEARS);
 	validateint("MaxBandwidth", &cfg.maxbw, DEFMAXBW, 0, BWMAX);
 	validatebool("CheckDiskSpace", &cfg.spacecheck, USESPACECHECK);

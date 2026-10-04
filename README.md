@@ -74,70 +74,98 @@ forget.
 
 ---
 
-## vnstat-tuned fork
+## vnstat-tuned：分钟级账期增强版
 
-This section is appended to the original fork README. The upstream text above
-is retained unchanged; its download, Docker and development commands install
-**upstream vnStat**, not this fork. This fork is independent of upstream and
-is based on the stable **v2.13** tag (`a77ace6e24028f22ec7213000daedfd5c7a9d70f`),
-not the unreleased 2.14 development tree. In particular, the development
-README's TrueType font reference does not describe this 2.13-based build.
-The original development snapshot remains available on `master`.
+这是由中文用户维护的 vnStat fork。本节为追加说明，上方原始 README 保持不变。
+上方的下载、Docker 和开发版命令安装的是**上游 vnStat**，不是这个 fork。
 
-### Scope
+本项目基于稳定版 **v2.13**，基线提交为
+`a77ace6e24028f22ec7213000daedfd5c7a9d70f`，不是尚未发布的 2.14 开发版。
+原始开发版 README 中的 TrueType 字体说明不适用于本项目的 2.13 构建。
+最初 fork 的开发版快照仍在 `master`，增强版默认分支为 `billing-v2.13`。
 
-The fork adds a configurable monthly billing boundary with **five-minute
-precision**, without changing the five-minute collection resolution or the
-SQLite database schema. Kernel counters, interface monitoring, byte units,
-retention, binary names and the GPL-2.0 license remain upstream-compatible.
-It is not a hosting-provider billing API, a packet sniffer, a quota enforcer,
-or a web dashboard. Provider accounting and kernel interface counters can
-differ.
+### 修改范围
+
+新增**一分钟精度的月度账期设置**，可以指定每月几号、几点、几分开始新账期。
+月度汇总不再被内存中的五分钟合并边界限制：非五分钟整点的设置使用一分钟缓存。
+持久化的五分钟历史数据、SQLite 数据库结构、网卡计数器、字节计量方式、
+数据保留默认值、程序名称及 GPL-2.0 许可保持原样，不新增另一套采集服务。
+
+这不是主机商账单 API、抓包程序、配额控制器或网站后台。网卡统计与主机商
+计量可能存在差异；一分钟账期也不等于逐包准确计费。
+
+### 账期配置
+
+在守护进程及查询工具使用的配置文件中设置，例如每月 7 日 18:24 开始新账期：
 
 ```ini
-# Generic example: each billing month starts on day 7 at 18:25.
+# 使用服务器本地时区，每月 7 日 18:24 切换账期。
 MonthRotate 7
 MonthRotateHour 18
-MonthRotateMinute 25
+MonthRotateMinute 24
 MonthRotateAffectsYears 0
 UseUTC 0
+
+# 保持较短的采集间隔；这不是数据库保存频率。
+PollInterval 5
+UpdateInterval 20
 ```
 
-- `MonthRotate`: 1 through 28, unchanged from upstream.
-- `MonthRotateHour`: 0 through 23; default 0.
-- `MonthRotateMinute`: 0, 5, 10, ..., 55; default 0.
-- Invalid settings produce a configuration warning and revert to their
-  defaults. A minute such as 24 is **not** rounded automatically; choose 25
-  explicitly if that approximation is suitable.
-- With `UseUTC 1`, the cutoff uses UTC. With `UseUTC 0`, it uses the daemon's
-  local timezone. Use the **same config and timezone** for vnstatd, vnstat and
-  vnstati. For fixed UTC+8 billing, use a non-DST timezone such as
-  `Asia/Singapore`; browser timezones must not change accounting boundaries.
-- Yearly totals remain calendar-based unless `MonthRotateAffectsYears 1`
-  is selected. Then the annual cutoff is the same day/time in January.
-- Existing monthly labels remain `YYYY-MM-01`. For example, a January label
-  covers January 7 18:25 through February 7 18:25 in the example above.
-  Existing databases need **no schema migration**. They are not retroactively
-  rebilled when settings change. Back up the database, coordinate daemon and
-  client configuration, and switch at a planned billing boundary.
-- Sampling and delayed saves retain upstream behavior. A polling interval
-  that straddles a boundary cannot be split into exact per-packet billing;
-  neither five-minute alignment nor this fork eliminates that uncertainty.
-- The cutoff also applies to monthly/yearly rates, period estimates and the
-  current month's 95th-percentile sample window.
+| 配置项 | 有效范围 | 默认值 |
+| --- | --- | --- |
+| `MonthRotate` | 1–28，与上游一致 | 1 |
+| `MonthRotateHour` | 0–23 | 0 |
+| `MonthRotateMinute` | **0–59 的任意整数** | 0 |
+| `MonthRotateAffectsYears` | 0 或 1 | 0 |
+| `UseUTC` | 0 或 1 | 0 |
 
-### Machine-readable output
+- 分钟 `24`、`26`、`59` 都有效，不再要求是 5 的倍数，也不会自动取整。
+- 越界值会警告并退回默认值，例如 `MonthRotateMinute 60` 会退回 `0`。
+- `UseUTC 1` 按 UTC 切换；`UseUTC 0` 按进程本地时区切换。`vnstatd`、`vnstat`
+  和 `vnstati` 必须使用一致的配置及时区。固定 UTC+8 可使用 `Asia/Singapore`；
+  网站访问者的时区不应改变服务器的统计账期。
+- 年度统计默认按自然年计算。设置 `MonthRotateAffectsYears 1` 后，年度边界
+  也使用 1 月的同一日期、小时和分钟。
+- 月度记录标签仍为 `YYYY-MM-01`。以上示例的 1 月标签表示
+  1 月 7 日 18:24 至 2 月 7 日 18:24，起点包含，终点不包含。
+- 默认小时和分钟均为 `0`，不添加配置时仍按午夜切换。
 
-JSON adds top-level `monthrotate`, `monthrotatehour`, `monthrotateminute`,
-`monthrotateaffectsyears` and `useutc`. XML adds a `billing` element containing
-the same settings. Existing traffic fields and date labels are preserved.
-These are the **query process's current settings**, not stored per-period
-configuration or historical billing evidence. Consumers should ignore
-unknown additive fields and use calendar labels with the configured timezone.
+### 从五分钟账期版升级
 
-### Build this fork
+原有 `0、5、10…55` 设置继续有效；现在可直接把近似值 `25` 改为真实值 `24`。
+已有数据库**不需要结构迁移**，但旧数据不会自动重新分桶或按新账期追溯重算。
+修改账期前备份数据库和配置，选择计划好的切换边界，协调采集与查询进程的配置。
+不要在同一个月中频繁切换规则，也不要同时运行两个采集守护进程。
 
-On Debian/Ubuntu, install build dependencies from the distribution repositories:
+采集沿用上游计数器差分方式：一个采集间隔的流量归入该间隔起点所在的缓存。
+如果采集间隔跨越账期边界，程序无法知道每个数据包在边界哪一侧，不会伪造
+按比例拆分的精确数据。建议保持 `PollInterval 5`、`UpdateInterval 20`，避免
+配置数分钟的采集间隔。`SaveInterval` 只控制写入数据库的频率，不是采集精度。
+
+一分钟缓存仅在账期分钟不是 5 的倍数时启用，每次保存可能有更多小缓存记录，
+但不会把持久化的五分钟表扩展成一分钟表，也不会改变数据保留期。
+
+### 95 百分位统计
+
+95 百分位仍使用上游五分钟历史样本，不生成伪造的一分钟样本。
+账期若设为 `18:24`，首个完整样本从 `18:25` 开始；下个账期边界附近的不完整
+五分钟样本同样排除。只有**完全落在账期内**的五分钟样本参与统计，避免跨账期
+样本混入。月度总量仍按一分钟缓存分别汇总，不会因百分位排除样本而少计。
+新账期开始后，若还没有完整五分钟样本，百分位查询可能暂时返回无可用数据。
+
+### JSON 与 XML 输出
+
+JSON 顶层追加 `monthrotate`、`monthrotatehour`、`monthrotateminute`、
+`monthrotateaffectsyears` 和 `useutc`；XML 追加包含这些设置的 `billing` 元素。
+原有流量字段及月度标签保留。这些字段表示**查询进程当前使用的配置**，不是
+数据库中逐月保存的历史账期快照。解析程序应允许新增字段。
+
+已修复 JSON/XML 字符串转义和小数地区设置问题。XML 百分位标签由非法的
+`95th_percentile` 改为合法的 `percentile_95`，依赖旧拼写的程序需要调整。
+
+### 构建这个 fork
+
+Debian/Ubuntu 可从发行版仓库安装构建依赖：
 
 ```sh
 sudo apt-get install build-essential autoconf automake pkg-config \
@@ -150,23 +178,19 @@ make -j2
 make check
 ```
 
-Follow the retained upstream installation and service instructions after
-testing. Keep a database/config backup and avoid running two collecting
-daemons against the same database. No modified Docker image is published here.
+验证通过后，可参考上方保留的上游安装与服务说明。部署前保留数据库和配置备份。
+本项目目前没有发布修改版 Docker 镜像。
 
-### Review and verification
+### 代码审查与验证
 
-The authored C sources, headers, tests, examples and build/service definitions
-were divided into explicit review areas. Generated Autotools files are not
-claimed as individually audited. Review and sanitizer tests reduce risk;
-they do **not** establish that any program is bug-free.
+已按模块审查手写 C 源码、头文件、测试、示例程序及构建/服务定义；不宣称对
+自动生成的 Autotools 文件逐行审计。审查和测试能降低风险，**不能证明绝无 bug**。
 
-See [the fork review record](docs/fork-review.md) for findings, provenance,
-reproducers, validation results and residual limitations. New billing tests
-exercise boundary inclusion, year rollover, leap years, timezones, DST,
-configuration validation, legacy labels and estimates.
+修复记录、上游修复来源、验证方法及剩余限制见[审查记录](docs/fork-review.md)。
+新增测试覆盖全部 60 个合法分钟值、账期前后、年界、闰年、时区、夏令时、
+真实采集缓存、汇总不丢失、不重复、导入标签和估算。
 
-For an out-of-tree verification build with Python 3:
+使用 Python 3 在独立构建目录中验证：
 
 ```sh
 python3 tests/run_fork_checks.py /tmp/vnstat-tuned-gcc
@@ -175,36 +199,28 @@ python3 tests/run_fork_checks.py /tmp/vnstat-tuned-sanitized --compiler clang --
 python3 tests/example_security.py
 ```
 
-The last command also requires Perl and PHP with ctype. Sanitizer runs disable
-leak detection because upstream tests intentionally exit or leave fixture
-objects allocated; memory-access and undefined-behavior checks remain enabled.
-Use new build directories for different compilers or flags. Public tests and
-examples use synthetic interfaces and generic billing settings only.
+示例测试还需要 Perl、PHP 及 ctype。上游测试夹具有意保留部分分配对象或结束
+子进程，因此测试运行器关闭泄漏检测，但内存访问和未定义行为检查仍开启。
+不同编译器或选项请使用不同构建目录。公开测试仅含合成数据和通用配置。
 
-Additional output tests require Python 3 and, for decimal-comma coverage, a
-generated locale such as `de_DE.UTF-8`:
+输出解析测试需要 Python 3；覆盖小数逗号时还需生成 `de_DE.UTF-8` 等地区设置：
 
 ```sh
 python3 tests/output_parse_tests.py /tmp/vnstat-tuned-gcc/vnstat --comma-locale de_DE.UTF-8
 ```
 
-The XML percentile element is corrected from the invalid `95th_percentile`
-to `percentile_95`. JSON/XML text escaping and numeric-locale handling are
-also repaired; adapt consumers that relied on the invalid XML spelling.
-
-The real-daemon smoke test requires root **inside an isolated Linux VM**,
-iproute2/util-linux and an unmodified v2.13 build for compatibility checks:
+真实守护进程验证应在**隔离的 Linux 虚拟机内**以 root 运行，需要
+iproute2/util-linux，以及用于兼容性对照的未修改 v2.13 构建：
 
 ```sh
 sudo unshare --net python3 tests/daemon_smoke.py /tmp/vnstat-tuned-gcc \
   --upstream-build /tmp/upstream-v2.13 --evidence /tmp/billing-smoke
 ```
 
-It refuses the host network namespace and uses only bounded synthetic traffic.
-For UTC accounting, `TZ=UTC` is recommended for query tools to avoid legacy
-calendar timestamp ambiguity around local daylight-saving transitions.
+该测试拒绝宿主网络命名空间，仅生成有界的合成流量。查询 UTC 数据时，建议
+查询工具使用 `TZ=UTC`，减少上游日历时间表示在夏令时附近的歧义。
+历史时区及特殊夏令时边界的限制详见审查记录，不承诺恢复所有历史偏移规则。
 
-On Linux/WSL with older Clang sanitizer runtimes, a startup address-layout
-conflict can occur even in an independent trivial program. For an isolated
-verification build, `--sanitize --no-pie` keeps ASan/UBSan checks enabled while
-disabling PIE only for that test build. It does not affect normal builds.
+部分 Linux/WSL 与旧版 Clang sanitizer 组合可能在启动时出现地址布局冲突，
+这个问题也能在独立简单程序中复现。隔离验证构建可使用 `--sanitize --no-pie`，
+只对该测试构建关闭 PIE，ASan/UBSan 仍开启，不影响正常生产构建。

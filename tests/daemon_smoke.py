@@ -40,7 +40,7 @@ def main():
                 'OfflineSaveInterval 1\nTimeSyncWait 0\nBandwidthDetection 0\n'
                 'MaxBandwidth 1000\nMonthRotate 7\n')
         oldconfig.write_text(base)
-        config.write_text(base + 'MonthRotateHour 18\nMonthRotateMinute 25\n')
+        config.write_text(base + 'MonthRotateHour 18\nMonthRotateMinute 24\n')
         log = (evidence / "commands.log").open("w")
 
         def run(command, capture=False):

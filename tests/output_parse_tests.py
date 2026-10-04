@@ -80,6 +80,25 @@ class OutputParseTests(unittest.TestCase):
             return self.comma_locale
         self.skipTest("No decimal-comma locale supplied; use --comma-locale")
 
+    def test_billing_metadata_preserves_every_minute(self):
+        for minute in range(60):
+            self.config.write_text(
+                f'DatabaseDir "{self.directory.name}"\nLocale "C"\nUseUTC 1\n'
+                f'MonthRotate 7\nMonthRotateHour 18\nMonthRotateMinute {minute}\n',
+                encoding="utf-8",
+            )
+            with self.subTest(minute=minute, kind="json"):
+                data = json.loads(self.output("json", "s"))
+                self.assertEqual(data["monthrotate"], 7)
+                self.assertEqual(data["monthrotatehour"], 18)
+                self.assertEqual(data["monthrotateminute"], minute)
+            with self.subTest(minute=minute, kind="xml"):
+                billing = ET.fromstring(self.output("xml", "s")).find("billing")
+                self.assertIsNotNone(billing)
+                self.assertEqual(billing.findtext("monthrotate"), "7")
+                self.assertEqual(billing.findtext("monthrotatehour"), "18")
+                self.assertEqual(billing.findtext("monthrotateminute"), str(minute))
+
     def test_json_modes_parse(self):
         for mode in "asfhdmytp":
             with self.subTest(mode=mode):

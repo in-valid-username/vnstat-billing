@@ -2,13 +2,35 @@
 #include "dbsql.h"
 #include "percentile.h"
 
+static time_t percentilegridcutoff(const time_t cutoff, const int roundup)
+{
+	struct tm calendar;
+	int remainder;
+
+	if ((cfg.useutc ? gmtime_r(&cutoff, &calendar) : localtime_r(&cutoff, &calendar)) == NULL) {
+		return (time_t)-1;
+	}
+	if (calendar.tm_min % 5 == 0 && calendar.tm_sec == 0) {
+		/* Preserve the helper's chosen DST instant for an already aligned cutoff. */
+		return cutoff;
+	}
+	if (roundup && calendar.tm_sec != 0) {
+		calendar.tm_min++;
+	}
+	remainder = calendar.tm_min % 5;
+	calendar.tm_min += roundup ? (5 - remainder) % 5 : -remainder;
+	calendar.tm_sec = 0;
+	calendar.tm_isdst = -1;
+	return cfg.useutc ? timegm(&calendar) : mktime(&calendar);
+}
+
 int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t userlimitbytespersecond)
 {
 	uint32_t entry = 0, entrylimit;
 	uint64_t *rxdata, *txdata, *sumdata;
 	const struct tm *d;
 	struct tm calendar;
-	time_t monthlabel, monthbegin, monthend;
+	time_t monthlabel, monthbegin, monthend, firstslot, lastslot;
 	char datebuff[DATEBUFFLEN], dateend[DATEBUFFLEN];
 	dbdatalist *datalist = NULL, *datalist_i = NULL;
 	dbdatalistinfo datainfo;
@@ -40,7 +62,6 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 		return 0;
 	}
 	d = cfg.useutc ? gmtime(&monthbegin) : localtime(&monthbegin);
-	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
 	pdata->monthbegin = monthbegin;
 	if (cfg.useutc) {
 		/* Public dates retain the query-calendar contract. TZ=UTC avoids local DST gaps. */
@@ -48,9 +69,24 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 		calendar.tm_isdst = -1;
 		pdata->monthbegin = mktime(&calendar);
 	}
-	/* The range API has an inclusive end; exclude the next billing period's first slot. */
-	monthend -= 300;
-	d = cfg.useutc ? gmtime(&monthend) : localtime(&monthend);
+	/* Persisted buckets are indivisible: omit either bucket straddling a cutoff. */
+	firstslot = percentilegridcutoff(monthbegin, 1);
+	lastslot = percentilegridcutoff(monthend, 0);
+	if (firstslot == (time_t)-1 || lastslot == (time_t)-1) {
+		snprintf(errorstring, 1024, "Failed to determine billing period for 95th percentile.");
+		printe(PT_Error);
+		return 0;
+	}
+	/* The range API has an inclusive end and bucket dates denote their starts. */
+	lastslot -= 300;
+	if (lastslot < firstslot) {
+		snprintf(errorstring, 1024, "No 5 minute data for 95th percentile available.");
+		printe(PT_Error);
+		return 0;
+	}
+	d = cfg.useutc ? gmtime(&firstslot) : localtime(&firstslot);
+	strftime(datebuff, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
+	d = cfg.useutc ? gmtime(&lastslot) : localtime(&lastslot);
 	strftime(dateend, DATEBUFFLEN, "%Y-%m-%d %H:%M", d);
 
 	if (!db_getdata_range(&datalist, &datainfo, iface, "fiveminute", 0, datebuff, dateend)) {
@@ -68,7 +104,7 @@ int getpercentiledata(percentiledata *pdata, const char *iface, const uint64_t u
 	pdata->databegin = datainfo.mintime;
 	pdata->dataend = datainfo.maxtime;
 	pdata->count = datainfo.count;
-	pdata->countexpectation = (uint32_t)((billingcalendartime(pdata->dataend) - monthbegin) / 300 + 1);
+	pdata->countexpectation = (uint32_t)((billingcalendartime(pdata->dataend) - firstslot) / 300 + 1);
 	pdata->minrx = datainfo.minrx;
 	pdata->mintx = datainfo.mintx;
 	pdata->min = datainfo.min;

@@ -552,7 +552,7 @@ int processifinfo(DSTATE *s, datacache **dc)
 	uint64_t rxchange, txchange;
 	uint64_t maxtransfer;
 	uint32_t maxbw;
-	time_t interval;
+	time_t interval, cacheinterval;
 	short detected64bit = 0;
 
 	if ((*dc)->syncneeded) { /* if --sync was used during startup */
@@ -616,7 +616,9 @@ int processifinfo(DSTATE *s, datacache **dc)
 		}
 
 		if (rxchange || txchange || cfg.trafficlessentries) {
-			xferlog_add(&(*dc)->log, (*dc)->updated - ((*dc)->updated % 300), rxchange, txchange);
+			/* Keep both sides of an off-grid billing cutoff separate before SQL aggregation. */
+			cacheinterval = cfg.monthrotateminute % 5 ? 60 : 300;
+			xferlog_add(&(*dc)->log, (*dc)->updated - ((*dc)->updated % cacheinterval), rxchange, txchange);
 		}
 	}
 	(*dc)->currx = ifinfo.rx;

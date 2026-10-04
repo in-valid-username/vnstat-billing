@@ -7,13 +7,14 @@ The implementation starts from upstream stable v2.13, commit
 snapshot remains on `master`; this is not a rewritten upstream history.
 See the [upstream release](https://github.com/vergoh/vnstat/releases/tag/v2.13).
 
-Monthly cutoffs use the existing day setting plus an hour and a minute on the
-five-minute grid. This matches the existing collection buckets and avoids a
-new database schema or a second accounting daemon. Defaults reproduce the
+Monthly cutoffs use the existing day setting plus an hour and any minute from
+0 through 59. Off-grid cutoffs use one-minute in-memory traffic buckets,
+avoiding a new database schema or a second accounting daemon. Persisted
+five-minute history keeps its resolution. Defaults reproduce the
 existing midnight cutoff. Yearly rotation remains opt-in. Imports retain their
 original labels; changing settings does not reassign old traffic.
 
-Not changed: kernel counter collection, bucket resolution, byte units, retention
+Not changed: kernel counter collection, persisted bucket resolution, byte units, retention
 defaults, interface discovery, binaries, service installation or licensing.
 The fork does not implement provider billing, packet capture, quotas, a website
 or remote control. No production systems were modified during development.
@@ -43,7 +44,7 @@ Findings below distinguish demonstrated defects from defensive hardening.
 | Merge failure | A failed source lookup rolls back using the wrong active database handle | Select destination before rollback; failure-path regression |
 | Hourly graph | Unit padding exceeds a row's bounds; a long disabled interface title can append beyond its buffer | Backport upstream unit-padding repair and bound the title append; unit-mode/long-title regressions |
 | Image rates | Zero/subunit rates can become zero denominators | Guard denominators without hiding nonzero rates; image regressions |
-| Percentile | Legacy range end is inclusive and can include the next month's first slot; fixed maximum assumes a DST-free 31-day month | Exact billing start and last five-minute slot, actual sample expectation; boundary/DST regressions |
+| Percentile | Legacy range end is inclusive and can include the next month's first slot; fixed maximum assumes a DST-free 31-day month | Use only complete five-minute slots within the billing period, with actual sample expectation; all-minute/boundary/DST regressions |
 | JSON/XML averages | Percentile total average has missing parentheses | Divide combined RX+TX by the complete sampled duration |
 | XML output | `<95th_percentile>` is not a legal XML element name | Emit `<percentile_95>`; consumers using text matching must update |
 | Output escaping | Interface/alias text is inserted without JSON/XML escaping | Escape delimiters and controls; XML 1.0 forbidden ASCII controls become U+FFFD |
@@ -68,13 +69,13 @@ Local results on 2026-10-04:
 
 | Validation | Result |
 | --- | --- |
-| GCC full C suite | 642 checks, 0 failures, 0 errors; UTC and UTC+8 |
-| Clang full C suite | 642 checks, 0 failures, 0 errors |
-| Clang AddressSanitizer + UndefinedBehaviorSanitizer | 642 checks, 0 failures, 0 errors; no sanitizer diagnostics |
+| GCC full C suite | 861 checks, 0 failures, 0 errors; UTC and UTC+8 |
+| Clang full C suite | 861 checks, 0 failures, 0 errors |
+| Clang AddressSanitizer + UndefinedBehaviorSanitizer | 861 checks, 0 failures, 0 errors; no sanitizer diagnostics |
 | Real daemon compatibility smoke | RX/TX increase after reload and restart; original CLI totals match |
 | Database checks in smoke test | Schema unchanged; integrity check `ok` |
 | Smoke output | JSON/XML parse successfully; valid nonempty summary PNG |
-| JSON/XML regression parser | 10 tests passed, including decimal-comma locale; no skips |
+| JSON/XML regression parser | 11 tests passed, including all 60 minute values and decimal-comma locale; no skips |
 | CGI/PHP example regression suite | 21 tests passed |
 | Source package `make distcheck` | Build/check/install/uninstall passed |
 
@@ -97,6 +98,15 @@ the original CLI, unchanged schema, SQLite integrity, JSON/XML parsing and PNG
 output. It does not change the VM clock. Synthetic C tests exercise cutoff
 boundaries, leap years, local DST, UTC, import labels and partial periods.
 
+Minute-level regressions exercise all 60 accepted values through both direct
+SQL aggregation and the real `processifinfo`/cache-flush path. They verify month
+and optional year splits, unchanged five-minute persistence, conserved totals
+and an empty second flush. Straddling-sample tests retain upstream attribution
+to the interval start rather than inventing a proportional split. The real
+daemon smoke configuration uses an off-grid minute (`24`). Percentile tests
+cover all minutes, both UTC modes, midnight rollover, missing complete slots,
+partial-only data and a local daylight-saving gap.
+
 The historical Singapore regression compares sample dates with the existing
 database getter's contract rather than hardcoding Unix epochs. SQLite versions
 on Ubuntu 22.04, Ubuntu 24.04 and macOS differ in their handling of Singapore's
@@ -118,10 +128,14 @@ generally be ignored. Original failure logs are retained locally.
 
 ## Compatibility and operational limits
 
-- Cutoffs accept days 1-28 and five-minute-aligned minutes only. No automatic
-  rounding: choose the accepted approximation explicitly.
+- Cutoffs accept days 1-28, hours 0-23 and all integer minutes 0-59. No rounding
+  is applied. Off-grid minute settings use 60-second in-memory buckets;
+  five-minute-aligned settings retain the original 300-second cache buckets.
+- The 95th percentile excludes any partially overlapping five-minute bucket at
+  either billing edge. Monthly totals still include separately accounted
+  minute-cache traffic; incomplete percentile samples are not prorated.
 - The interval that straddles a cutoff still has upstream sampling uncertainty.
-  Five-minute billing is not exact per-packet or provider-side billing.
+  Minute-level billing is not exact per-packet or provider-side billing.
 - `UseUTC 0` uses process local time. Fixed UTC+8 should use `Asia/Singapore` in
   every service/query process. Browser timezone changes must not alter billing.
 - For `UseUTC 1`, run query tools with `TZ=UTC` when practical. Upstream's
