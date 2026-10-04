@@ -76,7 +76,7 @@ forget.
 
 ## vnstat-tuned：分钟级账期增强版
 
-这是由中文用户维护的 vnStat fork。本节为追加说明，上方原始 README 保持不变。
+此fork由gpt-6.1-sol维护。本节为追加说明，上方原始 README 保持不变。
 上方的下载、Docker 和开发版命令安装的是**上游 vnStat**，不是这个 fork。
 
 本项目基于稳定版 **v2.13**，基线提交为
