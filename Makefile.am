@@ -6,7 +6,9 @@ dist_man_MANS = man/vnstat.1 man/vnstat.conf.5 man/vnstatd.8 man/vnstati.1
 EXTRA_DIST = cfg examples UPGRADE CHANGES FAQ INSTALL_BSD UNINSTALL \
 	README.md INSTALL.md INSTALL_BSD.md UPGRADE.md UNINSTALL.md \
 	tests/example_security.py tests/run_fork_checks.py tests/output_parse_tests.py \
-	tests/daemon_smoke.py docs/fork-review.md
+	tests/daemon_smoke.py docs/fork-review.md docs/billing.md docs/output.md \
+	docs/build-and-test.md docs/reference/baseline.md \
+	docs/reference/upstream-readme.txt docs/reports/2026-10-04-validation.md
 
 bin_PROGRAMS = vnstat
 sbin_PROGRAMS = vnstatd
@@ -122,6 +124,9 @@ check_vnstat_SOURCES += tests/image_tests.c tests/image_tests.h \
   src/image_support.c src/image_support.h
 endif
 endif
+
+README: $(srcdir)/README.md
+	cp -a $(srcdir)/README.md README
 
 INSTALL: $(srcdir)/INSTALL.md
 	cp -a $(srcdir)/INSTALL.md INSTALL

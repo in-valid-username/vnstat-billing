@@ -1,53 +1,41 @@
+# vnstat-tuned
 
-# What is vnStat
+vnstat-tuned 为 [vnStat](https://github.com/vergoh/vnstat) 增加分钟级月度账期，可以按每月指定日期、小时和分钟汇总网卡流量。统计沿用内核计数器和原有 SQLite 数据库；持久化的五分钟历史分辨率保持不变。
 
-vnStat is a console-based network traffic monitor that uses the network
-interface statistics provided by the kernel as information source. This
-means that vnStat won't actually be sniffing any traffic and also ensures
-light use of system resources regardless of network traffic rate.
+## 快速开始
 
-By default, traffic statistics are stored on a five minute level for the last
-48 hours, on a hourly level for the last 4 days, on a daily level for the
-last 2 full months and on a yearly level forever. The data retention durations
-are fully user configurable. Total seen traffic and a top days listing is also
-provided. Optional image output is available in systems with the GD library
-installed.
+在 Debian 或 Ubuntu 上安装构建依赖并编译：
 
-See the webpage https://humdi.net/vnstat/ for output examples.
+```sh
+sudo apt-get install build-essential autoconf automake pkg-config \
+  libsqlite3-dev libgd-dev check
+git clone --branch billing-v2.13 https://github.com/in-valid-username/vnstat-tuned.git
+cd vnstat-tuned
+autoreconf -fi
+./configure
+make -j2
+make check
+```
 
+安装与服务配置见[构建和测试](docs/build-and-test.md)。在守护进程及查询工具共用的配置文件中设置账期，例如每月 7 日 18:24：
 
-# Getting started
+```ini
+MonthRotate 7
+MonthRotateHour 18
+MonthRotateMinute 24
+UseUTC 0
+```
 
-vnStat works best when installed. See the INSTALL or INSTALL_BSD file
-depending on used operating system. These files contain all needed
-information for the installing process. Instructions for upgrading from
-a previous version are included in the UPGRADE file. Release notes
-can be found from the CHANGES file.
+`UseUTC 0` 使用进程本地时区。修改现有账期前备份配置和数据库，并在计划好的边界切换；旧记录保留原有汇总结果。参数、采样精度和升级步骤见[账期配置](docs/billing.md)。
 
+## 文档
 
-# Available options and documentation
+- [账期配置](docs/billing.md)：参数、时区、采样与切换。
+- [JSON 与 XML](docs/output.md)：账期字段和输出兼容性。
+- [构建和测试](docs/build-and-test.md)：依赖、安装和回归测试。
+- [修复与兼容性](docs/fork-review.md)：修复位置、上游来源和已知问题。
+- [验证报告](docs/reports/2026-10-04-validation.md)：测试环境、结果与失败记录。
 
-A list of commonly used options is available with `vnstat --help`. The
-complete list can be accessed with `vnstat --longhelp`. The following
-man pages are available with more detailed descriptions of each option
-including some usage examples:
+## 来源与许可
 
-    vnstat          general documentation and console query parameters
-    vnstatd         daemon documentation
-    vnstati         image output documentation
-    vnstat.conf     configuration file
-
-
-# Contacting the author
-
-email:    Teemu Toivola <tst at iki dot fi>
-irc:      Vergo (IRCNet)
-
-git:      https://github.com/vergoh/vnstat
-
-The current version of vnStat is always available from
-https://humdi.net/vnstat/
-
-Bug reports, improvement ideas, feature requests and pull requests should
-be sent using the matching features on GitHub as those are harder to miss
-or forget.
+vnStat 原作者为 Teemu Toivola。本分支使用 GPT-6.1 Sol 辅助开发，代码按 [GPL-2.0](COPYING) 分发。源代码基线及上游文档见[来源说明](docs/reference/baseline.md)。

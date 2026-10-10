@@ -1,163 +1,38 @@
-# Billing fork: scope, review and validation
+# 修复与兼容性
 
-## Baseline and design
+本分支增加分钟级账期，并修复采集、数据库、输出和示例程序中的具体缺陷。源码基线见[来源说明](reference/baseline.md)，配置与采样规则见[账期指南](billing.md)。
 
-The implementation starts from upstream stable v2.13, commit
-`a77ace6e24028f22ec7213000daedfd5c7a9d70f`. The original fork's development
-snapshot remains on `master`; this is not a rewritten upstream history.
-See the [upstream release](https://github.com/vergoh/vnstat/releases/tag/v2.13).
+## 修复记录
 
-Monthly cutoffs use the existing day setting plus an hour and any minute from
-0 through 59. Off-grid cutoffs use one-minute in-memory traffic buckets,
-avoiding a new database schema or a second accounting daemon. Persisted
-five-minute history keeps its resolution. Defaults reproduce the
-existing midnight cutoff. Yearly rotation remains opt-in. Imports retain their
-original labels; changing settings does not reassign old traffic.
-
-Not changed: kernel counter collection, persisted bucket resolution, byte units, retention
-defaults, interface discovery, binaries, service installation or licensing.
-The fork does not implement provider billing, packet capture, quotas, a website
-or remote control. No production systems were modified during development.
-
-## Review coverage
-
-All authored `src/*.c` and `src/*.h`, the C test modules and headers, example
-CGI/PHP scripts, configuration, authored build definitions and service templates
-were read across the main review and two completed independent review areas.
-The main review covered acquisition, interface detection, cache, daemon,
-database, configuration and billing changes. Independent reviews covered
-output/merge/image/percentile code and examples/build/service integration.
-Generated Autotools output and external dependencies are not claimed as
-individually audited. Documentation was checked for the modified contracts.
-
-Reading all code is not formal verification. Tests cover specified cases, not
-every possible operating system, corrupt input or historical timezone rule.
-Findings below distinguish demonstrated defects from defensive hardening.
-
-## Findings and changes
-
-| Area | Observation in v2.13 | Change / regression evidence |
+| 模块 | 原问题 | 实现与回归位置 |
 | --- | --- | --- |
-| Metadata SQL | `db_setinfo` has a 128-byte array but passes 512 to the insert formatter; sufficiently long metadata overruns it | Allocate SQLite-formatted SQL dynamically; long metadata insert/update test |
-| Daemon UTC cache | Database calendar timestamps are reused as actual epochs; `UseUTC 1` with a non-UTC process timezone can delay collection or discard an initial interval | Separate real-epoch daemon lookup from the retained CLI calendar contract; winter/summer, UTC, UTC+8 and New York tests |
-| SQL hardening | Retention query passes 512 for a 256-byte array | Use the actual array size; no separate exploitability claim |
-| Merge failure | A failed source lookup rolls back using the wrong active database handle | Select destination before rollback; failure-path regression |
-| Hourly graph | Unit padding exceeds a row's bounds; a long disabled interface title can append beyond its buffer | Backport upstream unit-padding repair and bound the title append; unit-mode/long-title regressions |
-| Image rates | Zero/subunit rates can become zero denominators | Guard denominators without hiding nonzero rates; image regressions |
-| Percentile | Legacy range end is inclusive and can include the next month's first slot; fixed maximum assumes a DST-free 31-day month | Use only complete five-minute slots within the billing period, with actual sample expectation; all-minute/boundary/DST regressions |
-| JSON/XML averages | Percentile total average has missing parentheses | Divide combined RX+TX by the complete sampled duration |
-| XML output | `<95th_percentile>` is not a legal XML element name | Emit `<percentile_95>`; consumers using text matching must update |
-| Output escaping | Interface/alias text is inserted without JSON/XML escaping | Escape delimiters and controls; XML 1.0 forbidden ASCII controls become U+FFFD |
-| JSON locales | Decimal-comma locales produce invalid JSON percentages | Serialize numeric fractions with a decimal point; decimal-comma parser tests |
-| Example CGI | Shell-command interpolation and HTML/cache handling have proven unsafe paths | Argument-list execution, escaping and cache validation; 21 example security regressions |
-| Test harness | Returning a raw failed-test count can wrap to a successful process exit status | Return `EXIT_FAILURE` for any nonzero failure count |
-| Source package | Markdown documentation copy rules assume an in-tree build | Use `srcdir`, explicit dependencies and include Markdown/test documentation in distribution |
+| 元数据 SQL | 128 字节缓冲区按 512 字节长度格式化，长元数据会越界 | [dbsql.c](../src/dbsql.c) 的 `db_setinfo` 使用 SQLite 动态格式化；[数据库测试](../tests/dbsql_tests.c) |
+| UTC 采集缓存 | 将数据库日历时间当作实际 epoch，非 UTC 进程可能延迟采集或丢失初始间隔 | `db_getinterfaceinfo_epoch` 分离实际时间读取；[守护进程测试](../tests/daemon_tests.c) |
+| 保留期 SQL | 256 字节缓冲区按 512 字节长度传入 | [dbsql.c](../src/dbsql.c) 按实际数组长度格式化 |
+| 数据合并 | 来源查询失败时在错误数据库句柄回滚 | [dbmerge.c](../src/dbmerge.c) 与 [合并测试](../tests/dbmerge_tests.c) |
+| 小时图 | 单位填充超出行边界，长接口标题可能溢出 | [image.c](../src/image.c)、[image_support.c](../src/image_support.c) 与 [图片测试](../tests/image_tests.c) |
+| 图片速率 | 零值或小于单位的速率产生零分母 | 同上，检查分母并保留非零速率 |
+| 95 百分位 | 结束边界包含下月样本，固定样本上限忽略夏令时 | [percentile.c](../src/percentile.c) 仅统计账期内完整样本；[百分位测试](../tests/percentile_tests.c) |
+| JSON/XML 平均值 | RX+TX 平均值表达式缺括号 | [dbjson.c](../src/dbjson.c)、[dbxml.c](../src/dbxml.c) |
+| 输出格式 | XML 元素名非法，文本未转义，小数逗号使 JSON 无效 | [输出说明](output.md) 与 [解析测试](../tests/output_parse_tests.py) |
+| CGI/PHP 示例 | Shell 插值、HTML 转义和缓存校验存在不安全路径 | [examples](../examples)、[示例回归](../tests/example_security.py) |
+| 测试退出码 | 直接返回失败数量可能溢出为成功退出码 | [vnstat_tests.c](../tests/vnstat_tests.c) 对非零失败返回 `EXIT_FAILURE` |
+| 源码包 | Markdown 复制规则依赖源码内构建，分发遗漏文档和测试 | [Makefile.am](../Makefile.am) 使用 `srcdir` 和显式分发清单 |
 
-Example hardening follows upstream fixes, including commits
-`2098360`, `1158c9b`, `5f49455`, `994d323` and `978d8d9`.
-The hourly graph repair follows upstream commit `e6d6260`.
-These are targeted repairs, not a wholesale import of the unreleased tree.
+示例修复参考上游提交 [2098360](https://github.com/vergoh/vnstat/commit/2098360)、[1158c9b](https://github.com/vergoh/vnstat/commit/1158c9b)、[5f49455](https://github.com/vergoh/vnstat/commit/5f49455)、[994d323](https://github.com/vergoh/vnstat/commit/994d323) 和 [978d8d9](https://github.com/vergoh/vnstat/commit/978d8d9)。小时图修复参考 [e6d6260](https://github.com/vergoh/vnstat/commit/e6d6260)。
 
-## Local virtual-machine validation
+## 时区与历史数据
 
-An isolated WSL2 virtual machine running Ubuntu 22.04 was created from an
-official Ubuntu WSL image. It was not an existing user distro or a production
-VPS. Toolchain: GCC 11.4, Clang 14, SQLite 3.37.2, GD 2.3, Perl 5.34 and PHP 8.1.
-The original v2.13 suite passed all 589 checks before comparison.
+上游数据库 getter 使用日历时间表示。`UseUTC 1` 与非 UTC 查询进程组合时，夏令时缺失、重复时间以及历史偏移可能产生歧义；现代固定 UTC+8 账期没有夏令时切换。查询建议见[账期指南](billing.md#时区与标签)。
 
-Local results on 2026-10-04:
+历史新加坡用例依照数据库 getter 的契约比较日期。Ubuntu 22.04、Ubuntu 24.04 和 macOS 的 SQLite 对 1970 年 UTC+7:30 的换算不同，因此该用例检查正确的月界、样本数、覆盖率和总量，现代账期用例仍检查精确时间。
 
-| Validation | Result |
-| --- | --- |
-| GCC full C suite | 861 checks, 0 failures, 0 errors; UTC and UTC+8 |
-| Clang full C suite | 861 checks, 0 failures, 0 errors |
-| Clang AddressSanitizer + UndefinedBehaviorSanitizer | 861 checks, 0 failures, 0 errors; no sanitizer diagnostics |
-| Real daemon compatibility smoke | RX/TX increase after reload and restart; original CLI totals match |
-| Database checks in smoke test | Schema unchanged; integrity check `ok` |
-| Smoke output | JSON/XML parse successfully; valid nonempty summary PNG |
-| JSON/XML regression parser | 11 tests passed, including all 60 minute values and decimal-comma locale; no skips |
-| CGI/PHP example regression suite | 21 tests passed |
-| Source package `make distcheck` | Build/check/install/uninstall passed |
+账期输出字段反映当前查询配置。数据库未保存逐月配置历史，账期变更也不重算旧记录。完整说明见[输出字段](output.md#账期字段)。
 
-Fork validation is reproducible with:
+## 已知问题
 
-```sh
-python3 tests/run_fork_checks.py /tmp/billing-gcc
-python3 tests/run_fork_checks.py /tmp/billing-clang --compiler clang
-python3 tests/run_fork_checks.py /tmp/billing-sanitized --compiler clang --sanitize --no-pie
-python3 tests/output_parse_tests.py /tmp/billing-gcc/vnstat --comma-locale de_DE.UTF-8
-python3 tests/example_security.py
-sudo unshare --net python3 tests/daemon_smoke.py /tmp/billing-gcc \
-  --upstream-build /tmp/upstream-v2.13 --evidence /tmp/billing-smoke
-```
+- 部分历史汇总平均值使用当前年份的闰年状态。
+- 极端百分位限制参数的乘法范围仍需单独检查。
+- 非法 UTF-8 别名和旧 metrics/示例的部分显示边界仍需处理。
 
-The smoke test refuses the host network namespace. It sends bounded UDP echo
-traffic over an isolated veth pair, using an upstream-created database. It
-checks collection, SIGHUP, graceful shutdown/restart, matching totals through
-the original CLI, unchanged schema, SQLite integrity, JSON/XML parsing and PNG
-output. It does not change the VM clock. Synthetic C tests exercise cutoff
-boundaries, leap years, local DST, UTC, import labels and partial periods.
-
-Minute-level regressions exercise all 60 accepted values through both direct
-SQL aggregation and the real `processifinfo`/cache-flush path. They verify month
-and optional year splits, unchanged five-minute persistence, conserved totals
-and an empty second flush. Straddling-sample tests retain upstream attribution
-to the interval start rather than inventing a proportional split. The real
-daemon smoke configuration uses an off-grid minute (`24`). Percentile tests
-cover all minutes, both UTC modes, midnight rollover, missing complete slots,
-partial-only data and a local daylight-saving gap.
-
-The historical Singapore regression compares sample dates with the existing
-database getter's contract rather than hardcoding Unix epochs. SQLite versions
-on Ubuntu 22.04, Ubuntu 24.04 and macOS differ in their handling of Singapore's
-1970 UTC+7:30 offset. The test still requires the correct January billing start,
-sample count, coverage and totals; modern cutoff tests retain exact expectations.
-
-Sanitizer checks cover address/undefined behavior. Leak detection is disabled
-because upstream test fixtures intentionally leave allocations or exit child
-processes. This does not certify the absence of memory leaks in every path.
-
-One PIE sanitizer run exited with SIGSEGV before test output on this WSL2
-kernel/Clang 14 environment. An independent program containing only `puts`
-reproduced empty-stderr startup failures (14 of 30 PIE runs), whereas the same
-probe built without PIE passed 30 of 30. The full suite also passed on retry.
-The Linux verification runner therefore offers opt-in `--no-pie` for sanitizer
-builds; it does not change normal builds or disable address/UB checks. This
-observation is an environment limitation, not a claim that SIGSEGV should
-generally be ignored. Original failure logs are retained locally.
-
-## Compatibility and operational limits
-
-- Cutoffs accept days 1-28, hours 0-23 and all integer minutes 0-59. No rounding
-  is applied. Off-grid minute settings use 60-second in-memory buckets;
-  five-minute-aligned settings retain the original 300-second cache buckets.
-- The 95th percentile excludes any partially overlapping five-minute bucket at
-  either billing edge. Monthly totals still include separately accounted
-  minute-cache traffic; incomplete percentile samples are not prorated.
-- The interval that straddles a cutoff still has upstream sampling uncertainty.
-  Minute-level billing is not exact per-packet or provider-side billing.
-- `UseUTC 0` uses process local time. Fixed UTC+8 should use `Asia/Singapore` in
-  every service/query process. Browser timezone changes must not alter billing.
-- For `UseUTC 1`, run query tools with `TZ=UTC` when practical. Upstream's
-  pseudo-local calendar representation cannot fully preserve nonexistent or
-  ambiguous DST times or all historical timezone offsets. The percentile
-  billing window now reads raw month labels to avoid shifting into the wrong
-  month, but historical sample timestamps retain the legacy getter contract.
-  Modern fixed UTC+8 billing does not have that DST ambiguity.
-- Changing the cutoff midway through a period can mix accounting conventions
-  in the same monthly label. Back up and switch at a coordinated boundary.
-- JSON billing fields and XML `billing` describe the query configuration,
-  not historical per-row settings. The XML percentile tag correction is a
-  deliberate output compatibility change.
-- Zero-time monthly defaults and old database schema are retained. Reading
-  totals with an old binary works, but old binaries do not understand the new
-  hour/minute semantics. Do not alternate collecting daemons.
-- Linux x86-64 was tested locally. BSD/macOS/32-bit runtime behavior is not
-  independently verified here; existing upstream CI remains available.
-- Historical summary averages that use the current year's leap-year state,
-  extreme percentile limit multiplication, malformed UTF-8 aliases and legacy
-  metrics/example presentation edge cases remain separate follow-up work.
-  They are not claimed fixed by this billing change.
-
-Public fixtures contain synthetic data only. Credentials, infrastructure
-inventories and private route research are outside this repository.
+上述项目保留为后续修复项。已执行的系统、工具链和测试结果见[2026-10-04 验证](reports/2026-10-04-validation.md)。
