@@ -8,7 +8,8 @@ EXTRA_DIST = cfg examples UPGRADE CHANGES FAQ INSTALL_BSD UNINSTALL \
 	tests/example_security.py tests/run_fork_checks.py tests/output_parse_tests.py \
 	tests/daemon_smoke.py docs/fork-review.md docs/billing.md docs/output.md \
 	docs/build-and-test.md docs/reference/baseline.md \
-	docs/reference/upstream-readme.txt docs/reports/2026-10-04-validation.md
+	docs/reference/upstream-readme.txt docs/reports/2026-10-04-validation.md \
+	docs/reports/2026-10-10-update-validation.md
 
 bin_PROGRAMS = vnstat
 sbin_PROGRAMS = vnstatd

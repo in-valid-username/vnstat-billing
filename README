@@ -34,7 +34,7 @@ UseUTC 0
 - [JSON 与 XML](docs/output.md)：账期字段和输出兼容性。
 - [构建和测试](docs/build-and-test.md)：依赖、安装和回归测试。
 - [修复与兼容性](docs/fork-review.md)：修复位置、上游来源和已知问题。
-- [验证报告](docs/reports/2026-10-04-validation.md)：测试环境、结果与失败记录。
+- [构建与更新验证](docs/reports/2026-10-10-update-validation.md)：生产替换、测试环境与底账检查；[此前验证](docs/reports/2026-10-04-validation.md)保留原始失败与复审。
 
 ## 来源与许可
 
